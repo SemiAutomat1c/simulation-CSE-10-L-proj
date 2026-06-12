@@ -126,8 +126,10 @@ ENTRY_LANE_X = 8.0
 ENTRY_QUEUE_FRONT_Y = 88.0
 ENTRY_QUEUE_SPACING = 4.8
 ENTRY_PATH_BOTTOM_VISIBLE_Y = 88.0
+ENTRY_MAIN_ENTRY_Y = 12.0
+ENTRY_TURN_X = 25.0
 ENTRY_GATE_Y = 29.5
-ENTRY_STOP_LINE_Y = 26.6
+ENTRY_STOP_LINE_Y = 36.0
 MAIN_ROAD_Y = 55.7
 ENTRY_LANE_MIN_GAP = 6.4
 DRIVING_LANE_MIN_GAP = 4.4
@@ -675,8 +677,9 @@ def _gate_crossing_path() -> list[tuple[float, float]]:
     return [
         _entry_stop_point(),
         (ENTRY_LANE_X, ENTRY_GATE_Y),
-        (ENTRY_LANE_X, MAIN_ROAD_Y),
-        (25.0, MAIN_ROAD_Y),
+        (ENTRY_LANE_X, ENTRY_MAIN_ENTRY_Y),
+        (ENTRY_TURN_X, ENTRY_MAIN_ENTRY_Y),
+        (ENTRY_TURN_X, MAIN_ROAD_Y),
     ]
 
 

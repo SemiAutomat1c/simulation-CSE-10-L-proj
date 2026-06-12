@@ -223,6 +223,21 @@ class ParkingSimulationTests(unittest.TestCase):
 
         self.assertTrue(checked)
 
+    def test_entry_crossing_uses_main_entry_before_turning_right(self) -> None:
+        payload = self.scenario_payload("baseline")
+
+        gate_crossing_points = [
+            car
+            for frame in payload["frames"]
+            for car in frame["cars"]
+            if car["id"] == 1 and car["state"] == "gate_crossing"
+        ]
+
+        self.assertTrue(gate_crossing_points)
+        self.assertTrue(any(abs(car["x"] - 8.0) <= 0.1 and car["y"] <= 18.0 for car in gate_crossing_points))
+        self.assertTrue(any(car["x"] >= 20.0 and car["y"] <= 18.0 for car in gate_crossing_points))
+        self.assertFalse(any(abs(car["x"] - 8.0) <= 0.1 and car["y"] > 40.0 for car in gate_crossing_points))
+
     def test_main_road_vehicles_do_not_stack_on_top_of_each_other(self) -> None:
         payload = self.scenario_payload("rush_hour")
 
@@ -492,7 +507,7 @@ class ParkingSimulationTests(unittest.TestCase):
         }
 
         self.assertTrue(wait_positions)
-        self.assertEqual(wait_positions, {(8.0, 26.6)})
+        self.assertEqual(wait_positions, {(8.0, 36.0)})
 
 
 if __name__ == "__main__":
