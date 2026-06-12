@@ -379,9 +379,13 @@ def _build_frames(slots: list[ParkingSlot], cars: list[CarRecord], interval: flo
 def _apply_vehicle_spacing(car_payload: list[dict]) -> None:
     moving_states = {"entry_queue", "approaching_gate", "gate_wait", "gate_crossing", "searching", "exiting", "denied"}
 
+    # Full entry lane (queue → approaching → gate_wait → gate_crossing): the car
+    # closest to the gate (lowest y) is the leader. Followers are pushed further
+    # from the gate (higher y). Covers the full vertical extent including the
+    # off-screen queue below the map (no y-bound filter).
     _enforce_lane_spacing(
         car_payload,
-        lambda car: car["state"] in {"entry_queue", "approaching_gate", "gate_wait", "gate_crossing"} and abs(car["x"] - ENTRY_LANE_X) <= 0.35 and car["y"] <= MAIN_ROAD_Y,
+        lambda car: car["state"] in {"entry_queue", "approaching_gate", "gate_wait", "gate_crossing"} and abs(car["x"] - ENTRY_LANE_X) <= 0.35,
         axis="y",
         direction=-1,
         minimum_gap=ENTRY_LANE_MIN_GAP,
@@ -688,11 +692,16 @@ def _entry_queue_target_point(cars: list[CarRecord], current_car: CarRecord, ref
     # queue reverts to the default far-field anchor (ENTRY_QUEUE_FRONT_Y).
     head_gap = 6.0
     if gate_processing_count > 0:
-        lead_queue_y = ENTRY_STOP_LINE_Y + head_gap + gate_processing_count * ENTRY_QUEUE_SPACING
+        lead_queue_y = ENTRY_STOP_LINE_Y + head_gap
     else:
         lead_queue_y = ENTRY_QUEUE_FRONT_Y
 
-    return (ENTRY_LANE_X, lead_queue_y + queue_idx * ENTRY_QUEUE_SPACING)
+    # Use effective_idx (not queue_idx) so positions stay stable when the front car
+    # leaves entry_queue and enters approaching_gate.
+    raw_y = lead_queue_y + effective_idx * ENTRY_QUEUE_SPACING
+    # Clamp: entry_queue cars must never be placed inside the gate zone.
+    min_safe_y = ENTRY_STOP_LINE_Y + head_gap
+    return (ENTRY_LANE_X, max(raw_y, min_safe_y))
 
 
 def _entry_approach_path(queue_start: tuple[float, float]) -> list[tuple[float, float]]:
