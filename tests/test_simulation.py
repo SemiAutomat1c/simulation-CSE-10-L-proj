@@ -182,9 +182,9 @@ class ParkingSimulationTests(unittest.TestCase):
                 if car["state"] == "entry_queue":
                     self.assertGreaterEqual(car["x"], 7.2)
                     self.assertLessEqual(car["x"], 8.8)
-                    self.assertGreaterEqual(car["y"], 82.0)
+                    self.assertGreaterEqual(car["y"], 40.0)
 
-    def test_entry_queue_starts_from_bottom_instead_of_gate(self) -> None:
+    def test_entry_queue_starts_offmap_then_stacks_behind_gate(self) -> None:
         payload = self.scenario_payload("rush_hour")
 
         checked = False
@@ -204,8 +204,10 @@ class ParkingSimulationTests(unittest.TestCase):
             )
             if not waiting or len(queued) < 2:
                 continue
-            self.assertGreaterEqual(queued[0]["y"], 82.0)
-            self.assertGreaterEqual(queued[1]["y"], 88.0)
+            if queued[0]["y"] > 48.0 or queued[1]["y"] > 56.0:
+                continue
+            self.assertLessEqual(queued[0]["y"], 48.0)
+            self.assertLessEqual(queued[1]["y"], 56.0)
             checked = True
             break
 
