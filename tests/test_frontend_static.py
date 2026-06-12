@@ -17,6 +17,7 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("carLayer", html)
         self.assertIn("metricMotorcycles", html)
         self.assertIn("Vehicle Mix", html)
+        self.assertIn("simulationStatus", html)
         self.assertIn("parkingMap", html)
         self.assertIn("MAIN ENTRY", html)
         self.assertIn("ONE-WAY SEARCH LOOP", html)
@@ -46,6 +47,8 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn(".vehicle-headlight", css)
         self.assertIn(".vehicle-brake-light", css)
         self.assertIn(".map-surface", css)
+        self.assertIn(".simulation-status", css)
+        self.assertIn(".control-rail.is-loading", css)
 
     def test_frontend_fetches_simulation_and_scenarios(self) -> None:
         js = (self.static_dir / "app.js").read_text()
@@ -58,6 +61,12 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("vehicleVisualClass", js)
         self.assertIn("createVehicleNode", js)
         self.assertIn("movementAngle", js)
+        self.assertIn("setSimulationStatus", js)
+        self.assertIn("setLoadingState", js)
+        self.assertIn("response.ok", js)
+        self.assertIn("catch (error)", js)
+        self.assertIn("scenarioSelect.disabled", js)
+        self.assertIn("speedSlider.disabled", js)
         self.assertIn("wheels-moving", js)
         self.assertIn("topdown-vehicle", js)
 

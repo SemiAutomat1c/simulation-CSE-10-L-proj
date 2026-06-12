@@ -1,12 +1,125 @@
 # Mall Parking Simulation
 
-A local FastAPI + SimPy demo that visualizes mall parking flow with a 2.5D pixel dashboard.
+A local FastAPI + SimPy class project that models mall parking flow and visualizes it in a top-down browser dashboard. The MVP is meant for review/demo use: choose a scenario, watch vehicles enter, park, queue, leave, and compare the summary metrics.
 
-## Run locally
+## What This Demonstrates
+
+- Discrete-event simulation for entry gates, search time, parking capacity, and exit flow.
+- Separate car and motorcycle parking rules.
+- Deterministic seeded scenarios so reviewers see repeatable results.
+- A browser dashboard with live occupancy, queue pressure, vehicle states, and summary metrics.
+- A small JSON API that can be inspected independently from the UI.
+
+## Setup
 
 ```bash
 python3 -m pip install -r requirements.txt
+```
+
+## Run Locally
+
+```bash
 python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
 
 Open `http://127.0.0.1:8001/`.
+
+## Run Tests
+
+```bash
+python3 -m unittest
+```
+
+The test suite covers the API contract, static frontend hooks, vehicle/slot rules, queue spacing, gate behavior, exit visibility, and deterministic scenario output.
+
+## Project Structure
+
+- `app/api.py`: FastAPI app, static file serving, and JSON endpoints.
+- `app/simulation.py`: SimPy-backed parking model, vehicle paths, slot assignment, timeline frames, and metrics.
+- `app/static/index.html`: Dashboard markup.
+- `app/static/style.css`: Top-down lot and vehicle visuals.
+- `app/static/app.js`: Scenario loading, playback, rendering, and UI resilience.
+- `tests/`: API, simulation behavior, and static frontend tests.
+- `scripts/generate_parking_background.py`: Utility script for generating the parking background asset.
+
+## Scenarios
+
+| Scenario | Purpose |
+| --- | --- |
+| `baseline` | Normal mall demand with balanced entry and exit flow. |
+| `rush_hour` | Clustered arrival wave that makes entry pressure easier to see. |
+| `limited_slots` | Reduced capacity, causing some vehicles to be denied. |
+| `slow_entry` | Slower entrance gate service, producing a visible entry queue. |
+| `exit_congestion` | Slower exit service, producing post-shopping exit congestion. |
+
+Unknown scenario names fall back to `baseline`.
+
+## Simulation Assumptions
+
+- One simulated run is generated server-side and replayed in the browser.
+- Scenario seeds make the output deterministic for review and testing.
+- Vehicles follow fixed readable lanes instead of free-form driving physics.
+- Cars use car slots; motorcycles use motorcycle slots.
+- Vehicles can be denied when a compatible slot is unavailable.
+- Queue spacing is modeled so vehicles do not stack visually on the same lane.
+
+## Vehicle States
+
+- `scheduled`: Vehicle has not appeared yet.
+- `entry_queue`: Vehicle is waiting before the entrance gate.
+- `approaching_gate`: Vehicle is moving toward the entrance stop line.
+- `gate_wait`: Vehicle is paused at the entrance gate.
+- `gate_crossing`: Vehicle is entering the lot.
+- `searching`: Vehicle is following the search loop toward an assigned slot.
+- `parked`: Vehicle is occupying a slot.
+- `exit_queue`: Vehicle has finished parking and is waiting to leave.
+- `exiting`: Vehicle is moving through the exit gate and outside road.
+- `denied`: Vehicle could not park because no compatible slot was available.
+- `done`: Vehicle has completed its path.
+
+## Metrics Glossary
+
+- `total_vehicle_count`: Total generated vehicles in the run.
+- `total_cars` / `total_motorcycles`: Vehicle mix by type.
+- `total_slots`: Total visible parking capacity.
+- `total_completed_vehicles`: Vehicles that successfully parked and completed the exit path.
+- `denied_vehicle_count`: Vehicles denied due to capacity/type constraints.
+- `average_search_time_minutes`: Average time from search start to parking start.
+- `max_entry_queue_length`: Largest entrance queue observed.
+- `max_exit_queue_length`: Largest exit queue observed.
+- `peak_occupied_slots`: Highest number of occupied/targeted/exiting slots at one time.
+- `occupancy_rate_percent`: Peak occupied slots divided by total slots.
+- `car_slot_occupancy_percent`: Peak car-slot usage.
+- `motorcycle_slot_occupancy_percent`: Peak motorcycle-slot usage.
+- `exit_completion_time_minutes`: Last vehicle completion time.
+
+## API Endpoints
+
+```text
+GET /api/scenarios
+```
+
+Returns the available scenario names and descriptions.
+
+```text
+GET /api/simulation?scenario=baseline
+```
+
+Returns the selected scenario, initial slots, generated timeline frames, and summary metrics. The JSON shape is intentionally stable for the frontend and tests.
+
+## Demo Walkthrough
+
+1. Start the local server and open the dashboard.
+2. Begin with `baseline` and point out the entry queue, gate animation, search loop, parking occupancy, and exit flow.
+3. Switch to `rush_hour` and compare entry queue pressure.
+4. Switch to `limited_slots` and show denied vehicles plus the denied counters.
+5. Switch to `slow_entry` or `exit_congestion` to isolate one bottleneck at a time.
+6. Use the speed slider and replay button to revisit interesting moments.
+7. Run `python3 -m unittest` to show the behavior is covered by automated tests.
+
+## Limitations
+
+- This is a local MVP, not a deployed production app.
+- There is no scenario editor, export flow, charting layer, authentication, or database.
+- The model prioritizes readable class-review behavior over real-world traffic physics.
+- The frontend is a static dashboard backed by the local FastAPI API.

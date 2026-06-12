@@ -56,6 +56,10 @@ select {
   box-shadow: 6px 6px 0 var(--shadow);
 }
 
+.control-rail.is-loading {
+  cursor: progress;
+}
+
 .brand {
   border-bottom: 3px solid var(--line);
   padding-bottom: 14px;
@@ -104,6 +108,24 @@ h1 {
   gap: 7px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.simulation-status {
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 2px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.simulation-status[data-status="ready"] {
+  color: var(--green);
+}
+
+.simulation-status[data-status="error"] {
+  color: var(--red);
 }
 
 .speed-slider {
@@ -169,6 +191,13 @@ select {
 .pixel-button:active {
   transform: translate(2px, 2px);
   box-shadow: 2px 2px 0 #050607;
+}
+
+.pixel-button:disabled,
+select:disabled,
+.speed-slider:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
 }
 
 .metric-grid {
