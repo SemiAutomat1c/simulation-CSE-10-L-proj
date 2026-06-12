@@ -182,7 +182,34 @@ class ParkingSimulationTests(unittest.TestCase):
                 if car["state"] == "entry_queue":
                     self.assertGreaterEqual(car["x"], 7.2)
                     self.assertLessEqual(car["x"], 8.8)
-                    self.assertGreaterEqual(car["y"], 82.0)
+                    self.assertGreaterEqual(car["y"], 40.0)
+
+    def test_entry_queue_fills_lane_behind_gate(self) -> None:
+        payload = self.scenario_payload("rush_hour")
+
+        checked = False
+        for frame in payload["frames"]:
+            waiting = [
+                car
+                for car in frame["cars"]
+                if car["state"] == "gate_wait" and abs(car["x"] - 8.0) <= 0.1 and abs(car["y"] - 36.0) <= 0.1
+            ]
+            queued = sorted(
+                [
+                    car
+                    for car in frame["cars"]
+                    if car["state"] == "entry_queue" and abs(car["x"] - 8.0) <= 0.1
+                ],
+                key=lambda car: car["y"],
+            )
+            if not waiting or len(queued) < 2:
+                continue
+            self.assertLessEqual(queued[0]["y"], 48.0)
+            self.assertLessEqual(queued[1]["y"], 56.0)
+            checked = True
+            break
+
+        self.assertTrue(checked)
 
     def test_entry_queue_uses_single_centerline(self) -> None:
         payload = self.scenario_payload("rush_hour")
@@ -473,7 +500,7 @@ class ParkingSimulationTests(unittest.TestCase):
 
         self.assertTrue(found_offscreen_queue)
 
-    def test_first_visible_vehicle_enters_from_bottom_edge(self) -> None:
+    def test_first_visible_vehicle_appears_in_entry_queue_lane(self) -> None:
         payload = self.scenario_payload("baseline")
 
         first_visible = None
@@ -496,8 +523,8 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertIn(first_visible["state"], {"entry_queue", "approaching_gate"})
         self.assertGreaterEqual(first_visible["x"], 7.2)
         self.assertLessEqual(first_visible["x"], 8.8)
-        self.assertGreaterEqual(first_visible["y"], 82.0)
-        self.assertLessEqual(first_visible["y"], 100.0)
+        self.assertGreaterEqual(first_visible["y"], 40.0)
+        self.assertLessEqual(first_visible["y"], 56.0)
 
     def test_entry_vehicles_face_upward_before_gate(self) -> None:
         payload = self.scenario_payload("baseline")
