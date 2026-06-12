@@ -49,6 +49,8 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn(".map-surface", css)
         self.assertIn(".simulation-status", css)
         self.assertIn(".control-rail.is-loading", css)
+        self.assertIn("overflow: hidden", css)
+        self.assertIn("grid-template-columns: clamp(360px, 29vw, 430px) minmax(0, 1fr)", css)
 
     def test_frontend_fetches_simulation_and_scenarios(self) -> None:
         js = (self.static_dir / "app.js").read_text()
