@@ -128,6 +128,7 @@ ENTRY_QUEUE_SPACING = 4.8
 ENTRY_PATH_BOTTOM_VISIBLE_Y = 88.0
 ENTRY_MAIN_ENTRY_Y = 12.0
 ENTRY_TURN_X = 25.0
+ROW_A_DRIVE_Y = 35.0
 ENTRY_GATE_Y = 29.5
 ENTRY_STOP_LINE_Y = 36.0
 MAIN_ROAD_Y = 55.7
@@ -600,7 +601,7 @@ def _car_position(
 ) -> tuple[float, float]:
     slot = next((slot for slot in slots if slot.id == car.slot_id), None)
     slot_point = (slot.x, slot.y) if slot else (18, 82)
-    search_start = (25, 55.7)
+    search_start = _search_start_point(slot)
     offscreen = (106, 55.7)
     queue_point = _entry_queue_point(cars, car, time_minutes)
 
@@ -614,7 +615,7 @@ def _car_position(
         return _entry_stop_point()
     if state == "gate_crossing":
         return _interpolate_path(
-            _gate_crossing_path(),
+            _gate_crossing_path(slot),
             car.gate_cross_start,
             car.search_start or car.denied_time,
             time_minutes,
@@ -673,13 +674,19 @@ def _entry_approach_path(queue_start: tuple[float, float]) -> list[tuple[float, 
     ]
 
 
-def _gate_crossing_path() -> list[tuple[float, float]]:
+def _search_start_point(slot: ParkingSlot | None) -> tuple[float, float]:
+    if slot is not None and slot.row == 0:
+        return (ENTRY_TURN_X, ROW_A_DRIVE_Y)
+    return (ENTRY_TURN_X, MAIN_ROAD_Y)
+
+
+def _gate_crossing_path(slot: ParkingSlot | None = None) -> list[tuple[float, float]]:
     return [
         _entry_stop_point(),
         (ENTRY_LANE_X, ENTRY_GATE_Y),
         (ENTRY_LANE_X, ENTRY_MAIN_ENTRY_Y),
         (ENTRY_TURN_X, ENTRY_MAIN_ENTRY_Y),
-        (ENTRY_TURN_X, MAIN_ROAD_Y),
+        _search_start_point(slot),
     ]
 
 

@@ -251,6 +251,26 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertTrue(crossing_times)
         self.assertGreaterEqual(crossing_times[-1] - crossing_times[0], 1.2)
 
+    def test_row_a_vehicles_do_not_visit_row_b_lane_before_parking(self) -> None:
+        payload = self.scenario_payload("baseline")
+        slot_rows = {slot["id"]: slot["row"] for slot in payload["slots"]}
+        row_a_car_id = next(
+            car["id"]
+            for frame in payload["frames"]
+            for car in frame["cars"]
+            if car["slot_id"] is not None and slot_rows[car["slot_id"]] == 0
+        )
+
+        row_a_entry_points = [
+            car
+            for frame in payload["frames"]
+            for car in frame["cars"]
+            if car["id"] == row_a_car_id and car["state"] in {"gate_crossing", "searching"}
+        ]
+
+        self.assertTrue(row_a_entry_points)
+        self.assertFalse(any(abs(car["x"] - 25.0) <= 0.25 and car["y"] > 40.0 for car in row_a_entry_points))
+
     def test_main_road_vehicles_do_not_stack_on_top_of_each_other(self) -> None:
         payload = self.scenario_payload("rush_hour")
 
