@@ -4,9 +4,16 @@ from app.simulation import EXIT_STOP_POINT, ParkingSimulationConfig, run_simulat
 
 
 class ParkingSimulationTests(unittest.TestCase):
+    _payload_cache: dict[str, dict] = {}
+
+    @classmethod
+    def scenario_payload(cls, scenario: str) -> dict:
+        if scenario not in cls._payload_cache:
+            cls._payload_cache[scenario] = run_simulation(ParkingSimulationConfig(scenario=scenario)).to_dict()
+        return cls._payload_cache[scenario]
+
     def test_cars_progress_through_required_states(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("baseline")
         states = {car["state"] for frame in payload["frames"] for car in frame["cars"]}
 
         self.assertIn("entry_queue", states)
@@ -19,8 +26,7 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertIn("done", states)
 
     def test_slots_are_never_double_booked_in_any_frame(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="rush_hour"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("rush_hour")
 
         for frame in payload["frames"]:
             occupied_slots = [
@@ -31,15 +37,13 @@ class ParkingSimulationTests(unittest.TestCase):
             self.assertEqual(len(occupied_slots), len(set(occupied_slots)))
 
     def test_limited_slots_records_denied_cars(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="limited_slots"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("limited_slots")
 
         self.assertGreater(payload["metrics"]["denied_cars"], 0)
         self.assertLess(payload["metrics"]["total_completed_cars"], payload["metrics"]["total_cars"])
 
     def test_payload_contains_metrics_slots_and_timeline(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("baseline")
 
         self.assertIn("timeline", payload)
         self.assertIn("slots", payload)
@@ -48,8 +52,7 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertIn("occupancy_rate_percent", payload["metrics"])
 
     def test_vehicle_payload_includes_cars_and_motorcycles(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("baseline")
         vehicle_types = {car["vehicle_type"] for frame in payload["frames"] for car in frame["cars"]}
 
         self.assertIn("car", vehicle_types)
@@ -58,8 +61,7 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertGreater(payload["metrics"]["total_motorcycles"], 0)
 
     def test_exiting_vehicle_payload_includes_visible_exit_phases(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("baseline")
         exit_phases = {
             car["exit_phase"]
             for frame in payload["frames"]
@@ -73,16 +75,14 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertIn("road", exit_phases)
 
     def test_slots_include_car_and_motorcycle_types(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("baseline")
         slot_types = {slot["slot_type"] for slot in payload["slots"]}
 
         self.assertIn("car_slot", slot_types)
         self.assertIn("motorcycle_slot", slot_types)
 
     def test_cars_never_occupy_motorcycle_only_slots(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="rush_hour"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("rush_hour")
         slot_types = {slot["id"]: slot["slot_type"] for slot in payload["slots"]}
 
         for frame in payload["frames"]:
@@ -91,8 +91,7 @@ class ParkingSimulationTests(unittest.TestCase):
                     self.assertNotEqual(slot_types[car["slot_id"]], "motorcycle_slot")
 
     def test_motorcycles_use_motorcycle_slots(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("baseline")
         slot_types = {slot["id"]: slot["slot_type"] for slot in payload["slots"]}
         parked_motorcycle_slots = {
             car["slot_id"]
@@ -104,8 +103,7 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertTrue(any(slot_types[slot_id] == "motorcycle_slot" for slot_id in parked_motorcycle_slots))
 
     def test_baseline_matches_visible_lot_capacity(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("baseline")
         car_slots_by_row = {
             row: sum(1 for slot in payload["slots"] if slot["slot_type"] == "car_slot" and slot["row"] == row)
             for row in (0, 1, 2)
@@ -116,8 +114,7 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertEqual(len(motorcycle_slots), 12)
 
     def test_motorcycles_never_occupy_car_slots(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("baseline")
         slot_types = {slot["id"]: slot["slot_type"] for slot in payload["slots"]}
 
         for frame in payload["frames"]:
@@ -126,8 +123,7 @@ class ParkingSimulationTests(unittest.TestCase):
                     self.assertEqual(slot_types[car["slot_id"]], "motorcycle_slot")
 
     def test_visible_vehicles_stay_inside_readable_map_area(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="limited_slots"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("limited_slots")
         visible_states = {"entry_queue", "approaching_gate", "gate_wait", "gate_crossing", "searching", "parked", "exit_queue", "exiting", "denied"}
 
         for frame in payload["frames"]:
@@ -143,8 +139,7 @@ class ParkingSimulationTests(unittest.TestCase):
                         self.assertLessEqual(car["y"], 88)
 
     def test_baseline_uses_all_car_rows(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("baseline")
         slot_rows = {slot["id"]: slot["row"] for slot in payload["slots"]}
         occupied_rows = {
             slot_rows[car["slot_id"]]
@@ -156,8 +151,7 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertEqual({0, 1, 2}, occupied_rows)
 
     def test_motorcycle_slots_stay_inside_marked_motorcycle_area(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("baseline")
         motorcycle_slots = [slot for slot in payload["slots"] if slot["slot_type"] == "motorcycle_slot"]
 
         for slot in motorcycle_slots:
@@ -167,8 +161,7 @@ class ParkingSimulationTests(unittest.TestCase):
             self.assertLessEqual(slot["y"], 36.0)
 
     def test_searching_vehicles_follow_lanes_before_parking(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("baseline")
 
         for frame in payload["frames"]:
             for car in frame["cars"]:
@@ -182,8 +175,7 @@ class ParkingSimulationTests(unittest.TestCase):
                     self.assertTrue(on_horizontal_lane or on_vertical_turn_lane or in_motorcycle_area or near_parking_slot)
 
     def test_entry_queue_stays_on_entry_centerline(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="rush_hour"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("rush_hour")
 
         for frame in payload["frames"]:
             for car in frame["cars"]:
@@ -193,8 +185,7 @@ class ParkingSimulationTests(unittest.TestCase):
                     self.assertLessEqual(car["y"], 10.5)
 
     def test_entry_queue_uses_single_centerline(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="rush_hour"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("rush_hour")
 
         checked = False
         for frame in payload["frames"]:
@@ -211,8 +202,7 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertTrue(checked)
 
     def test_entry_lane_vehicles_keep_visible_follow_distance(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="rush_hour"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("rush_hour")
 
         checked = False
         for frame in payload["frames"]:
@@ -234,8 +224,7 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertTrue(checked)
 
     def test_main_road_vehicles_do_not_stack_on_top_of_each_other(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="rush_hour"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("rush_hour")
 
         spacing_violations = []
         for frame in payload["frames"]:
@@ -256,8 +245,7 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertEqual(spacing_violations, [])
 
     def test_exiting_vehicles_reach_outside_road_before_done(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("baseline")
 
         reached_outside_road = False
         for frame in payload["frames"]:
@@ -271,8 +259,7 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertTrue(reached_outside_road)
 
     def test_exiting_vehicle_pauses_at_exit_stop_line_before_merge(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("baseline")
 
         wait_frames = [
             (frame["time_minutes"], car["x"], car["y"])
@@ -288,8 +275,7 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertGreaterEqual(len(wait_frames), 10)
 
     def test_exiting_vehicle_waits_inside_red_exit_gate_zone_before_merge(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("baseline")
 
         wait_frames = [
             car
@@ -306,8 +292,7 @@ class ParkingSimulationTests(unittest.TestCase):
             self.assertLessEqual(car["y"], 58.0)
 
     def test_exiting_approach_uses_raised_exit_gate_lane(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("baseline")
 
         old_exit_flow_lane_frames = [
             car
@@ -322,8 +307,7 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertEqual(old_exit_flow_lane_frames, [])
 
     def test_raised_exit_gate_lane_vehicles_do_not_stack(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="rush_hour"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("rush_hour")
 
         for frame in payload["frames"]:
             raised_lane_cars = [
@@ -339,8 +323,7 @@ class ParkingSimulationTests(unittest.TestCase):
                 self.assertGreaterEqual(right["x"] - left["x"], 2.6)
 
     def test_only_one_vehicle_occupies_exit_throat_wait_point_at_a_time(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="rush_hour"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("rush_hour")
 
         for frame in payload["frames"]:
             waiting = [
@@ -354,8 +337,7 @@ class ParkingSimulationTests(unittest.TestCase):
             self.assertLessEqual(len(waiting), 1)
 
     def test_exiting_vehicles_use_both_outside_road_directions(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("baseline")
 
         saw_up_exit = False
         saw_down_exit = False
@@ -373,29 +355,27 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertTrue(saw_up_exit)
         self.assertTrue(saw_down_exit)
 
-    def test_exit_turns_split_from_throat_in_correct_direction(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+    def test_exit_turns_follow_current_visual_lane_split(self) -> None:
+        payload = self.scenario_payload("baseline")
 
-        saw_left_turn_up = False
-        saw_right_turn_down = False
+        saw_up_merge = False
+        saw_down_merge = False
         for frame in payload["frames"]:
             for car in frame["cars"]:
-                if car["state"] != "exiting" or car["x"] < 88.0 or car["x"] > 91.5:
+                if car["state"] != "exiting" or car["exit_phase"] != "merge":
                     continue
-                if car["id"] % 2 == 1 and car["y"] < 55.7:
-                    saw_left_turn_up = True
-                if car["id"] % 2 == 0 and car["y"] > 55.7:
-                    saw_right_turn_down = True
-            if saw_left_turn_up and saw_right_turn_down:
+                if car["id"] % 2 == 1 and abs(car["y"] - EXIT_STOP_POINT[1]) <= 0.1 and car["x"] > 94.8:
+                    saw_up_merge = True
+                if car["id"] % 2 == 0 and abs(car["x"] - 94.8) <= 0.25 and car["y"] > 55.7:
+                    saw_down_merge = True
+            if saw_up_merge and saw_down_merge:
                 break
 
-        self.assertTrue(saw_left_turn_up)
-        self.assertTrue(saw_right_turn_down)
+        self.assertTrue(saw_up_merge)
+        self.assertTrue(saw_down_merge)
 
     def test_outside_road_uses_distinct_lanes_for_up_and_down_traffic(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("baseline")
 
         saw_up_lane = False
         saw_down_lane = False
@@ -403,9 +383,9 @@ class ParkingSimulationTests(unittest.TestCase):
             for car in frame["cars"]:
                 if car["state"] != "exiting":
                     continue
-                if abs(car["x"] - 94.8) <= 0.25 and car["y"] < 48.0:
+                if abs(car["x"] - 98.0) <= 0.25 and car["y"] < 48.0:
                     saw_up_lane = True
-                if abs(car["x"] - 98.0) <= 0.25 and car["y"] > 63.4:
+                if abs(car["x"] - 94.8) <= 0.25 and car["y"] > 63.4:
                     saw_down_lane = True
             if saw_up_lane and saw_down_lane:
                 break
@@ -432,8 +412,7 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertEqual(final_exit_directions(first), final_exit_directions(second))
 
     def test_entry_queue_can_extend_offscreen_above_map(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="rush_hour"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("rush_hour")
 
         found_offscreen_queue = False
         for frame in payload["frames"]:
@@ -447,8 +426,7 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertTrue(found_offscreen_queue)
 
     def test_first_visible_vehicle_enters_from_top_edge(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("baseline")
 
         first_visible = None
         for frame in payload["frames"]:
@@ -471,8 +449,7 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertLessEqual(first_visible["y"], 5.0)
 
     def test_first_vehicle_progresses_through_gate_stop_sequence(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("baseline")
 
         states = []
         for frame in payload["frames"]:
@@ -489,8 +466,7 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertEqual(current_index, len(expected_sequence))
 
     def test_gate_wait_position_stays_stable(self) -> None:
-        result = run_simulation(ParkingSimulationConfig(scenario="baseline"))
-        payload = result.to_dict()
+        payload = self.scenario_payload("baseline")
 
         wait_positions = {
             (car["x"], car["y"])

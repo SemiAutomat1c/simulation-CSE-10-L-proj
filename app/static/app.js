@@ -7,6 +7,8 @@ const entryGateArm = document.getElementById("entryGateArm");
 const exitGateArm = document.getElementById("exitGateArm");
 const speedSlider = document.getElementById("speedSlider");
 const speedValue = document.getElementById("speedValue");
+const simulationStatus = document.getElementById("simulationStatus");
+const controlRail = document.querySelector(".control-rail");
 let speedMultiplier = 1.0;
 
 const currentTime = document.getElementById("currentTime");
@@ -36,6 +38,34 @@ let previousVehiclePoints = new Map();
 
 function prettyMinutes(value) {
   return `${Number(value).toFixed(1)} min`;
+}
+
+function scenarioLabel(scenario) {
+  return scenario.replaceAll("_", " ");
+}
+
+function setSimulationStatus(message, status = "idle") {
+  if (!simulationStatus) return;
+  simulationStatus.textContent = message;
+  simulationStatus.dataset.status = status;
+}
+
+function setLoadingState(isLoading) {
+  if (controlRail) {
+    controlRail.classList.toggle("is-loading", isLoading);
+  }
+  scenarioSelect.disabled = isLoading;
+  playPauseButton.disabled = isLoading || !simulationData;
+  replayButton.disabled = isLoading || !simulationData;
+  speedSlider.disabled = isLoading;
+}
+
+async function fetchJson(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}`.trim());
+  }
+  return response.json();
 }
 
 function scenePoint(entity) {
@@ -251,27 +281,46 @@ function tick(timestamp) {
 }
 
 async function loadSimulation(scenario) {
-  const response = await fetch(`/api/simulation?scenario=${encodeURIComponent(scenario)}&t=${Date.now()}`);
-  simulationData = await response.json();
-  carLayer.innerHTML = "";
-  carNodes = new Map();
-  previousVehiclePoints = new Map();
-  renderSlotLayer(simulationData.slots);
-  updateSummary(simulationData.metrics);
-  resetPlayback();
+  setLoadingState(true);
+  setSimulationStatus(`Loading ${scenarioLabel(scenario)}...`, "loading");
+  try {
+    const nextSimulationData = await fetchJson(`/api/simulation?scenario=${encodeURIComponent(scenario)}&t=${Date.now()}`);
+    simulationData = nextSimulationData;
+    carLayer.innerHTML = "";
+    carNodes = new Map();
+    previousVehiclePoints = new Map();
+    renderSlotLayer(simulationData.slots);
+    updateSummary(simulationData.metrics);
+    resetPlayback();
+    setSimulationStatus(`${scenarioLabel(scenario)} ready`, "ready");
+  } catch (error) {
+    console.error("Failed to load simulation", error);
+    setSimulationStatus("Could not load simulation. Keeping the last valid run.", "error");
+  } finally {
+    setLoadingState(false);
+  }
 }
 
 async function loadScenarios() {
-  const response = await fetch("/api/scenarios");
-  const payload = await response.json();
-  Object.entries(payload.scenarios).forEach(([key, description]) => {
-    const option = document.createElement("option");
-    option.value = key;
-    option.textContent = key.replaceAll("_", " ");
-    option.title = description;
-    scenarioSelect.appendChild(option);
-  });
-  await loadSimulation("baseline");
+  setLoadingState(true);
+  setSimulationStatus("Loading scenarios...", "loading");
+  try {
+    const payload = await fetchJson("/api/scenarios");
+    scenarioSelect.innerHTML = "";
+    Object.entries(payload.scenarios).forEach(([key, description]) => {
+      const option = document.createElement("option");
+      option.value = key;
+      option.textContent = scenarioLabel(key);
+      option.title = description;
+      scenarioSelect.appendChild(option);
+    });
+    await loadSimulation("baseline");
+  } catch (error) {
+    console.error("Failed to load scenarios", error);
+    setSimulationStatus("Could not load scenarios. Check the local server and retry.", "error");
+  } finally {
+    setLoadingState(false);
+  }
 }
 
 scenarioSelect.addEventListener("change", async (event) => {
@@ -279,11 +328,13 @@ scenarioSelect.addEventListener("change", async (event) => {
 });
 
 playPauseButton.addEventListener("click", () => {
+  if (!simulationData) return;
   playing = !playing;
   playPauseButton.textContent = playing ? "Pause" : "Play";
 });
 
 replayButton.addEventListener("click", () => {
+  if (!simulationData) return;
   playing = true;
   playPauseButton.textContent = "Pause";
   resetPlayback();
@@ -298,6 +349,7 @@ if (speedSlider && speedValue) {
   });
 }
 
+setLoadingState(true);
 loadScenarios().then(() => {
   window.requestAnimationFrame(tick);
 });
