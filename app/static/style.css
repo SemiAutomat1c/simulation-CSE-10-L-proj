@@ -452,7 +452,7 @@ select:disabled,
 }
 
 .entry-gate-arm.open {
-  transform: rotate(-90deg);
+  transform: rotate(90deg);
 }
 
 .exit-gate-arm {
@@ -522,9 +522,9 @@ select:disabled,
 
 .entry-lane {
   left: 4.6%;
-  top: 8.8%;
+  top: 34%;
   width: 6.6%;
-  height: 20.8%;
+  height: 55%;
 }
 
 .exit-lane {

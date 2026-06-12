@@ -123,18 +123,23 @@ SCENARIO_PROFILES = {
 }
 
 ENTRY_LANE_X = 8.0
-ENTRY_QUEUE_FRONT_Y = -4.0
+ENTRY_QUEUE_FRONT_Y = 88.0
 ENTRY_QUEUE_SPACING = 4.8
-ENTRY_PATH_TOP_VISIBLE_Y = 2.0
+ENTRY_PATH_BOTTOM_VISIBLE_Y = 88.0
+ENTRY_MAIN_ENTRY_Y = 12.0
+ENTRY_TURN_X = 25.0
+ROW_A_DRIVE_Y = 35.0
 ENTRY_GATE_Y = 29.5
-ENTRY_STOP_LINE_Y = 26.6
+ENTRY_STOP_LINE_Y = 36.0
+ENTRY_GATE_QUEUE_FRONT_Y = ENTRY_STOP_LINE_Y + 6.0
 MAIN_ROAD_Y = 55.7
 ENTRY_LANE_MIN_GAP = 6.4
 DRIVING_LANE_MIN_GAP = 4.4
 MOTORCYCLE_LANE_MIN_GAP = 2.6
+ENTRY_QUEUE_FILL_MINUTES = 1.0
 ENTRY_APPROACH_MINUTES = 0.5
 ENTRY_GATE_PAUSE_MINUTES = 1.0
-ENTRY_GATE_CROSS_MINUTES = 0.45
+ENTRY_GATE_CROSS_MINUTES = 1.35
 EXIT_APPROACH_MINUTES = 2.5
 EXIT_GATE_PAUSE_MINUTES = 0.1
 EXIT_MERGE_MINUTES = 1.5
@@ -374,11 +379,15 @@ def _build_frames(slots: list[ParkingSlot], cars: list[CarRecord], interval: flo
 def _apply_vehicle_spacing(car_payload: list[dict]) -> None:
     moving_states = {"entry_queue", "approaching_gate", "gate_wait", "gate_crossing", "searching", "exiting", "denied"}
 
+    # Full entry lane (queue → approaching → gate_wait → gate_crossing): the car
+    # closest to the gate (lowest y) is the leader. Followers are pushed further
+    # from the gate (higher y). Covers the full vertical extent including the
+    # off-screen queue below the map (no y-bound filter).
     _enforce_lane_spacing(
         car_payload,
-        lambda car: car["state"] in {"entry_queue", "approaching_gate", "gate_wait", "gate_crossing"} and abs(car["x"] - ENTRY_LANE_X) <= 0.35 and car["y"] <= MAIN_ROAD_Y,
+        lambda car: car["state"] in {"entry_queue", "approaching_gate", "gate_wait", "gate_crossing"} and abs(car["x"] - ENTRY_LANE_X) <= 0.35,
         axis="y",
-        direction=1,
+        direction=-1,
         minimum_gap=ENTRY_LANE_MIN_GAP,
     )
     _enforce_lane_spacing(
@@ -510,7 +519,7 @@ def _car_heading(car: CarRecord, cars: list[CarRecord], slots: list[ParkingSlot]
         return slot.angle
 
     if state in {"entry_queue", "gate_wait"}:
-        return 180.0
+        return 0.0
 
     if state not in {"approaching_gate", "gate_crossing", "searching", "exiting", "denied"}:
         return None
@@ -598,21 +607,20 @@ def _car_position(
 ) -> tuple[float, float]:
     slot = next((slot for slot in slots if slot.id == car.slot_id), None)
     slot_point = (slot.x, slot.y) if slot else (18, 82)
-    search_start = (25, 55.7)
+    search_start = _search_start_point(slot)
     offscreen = (106, 55.7)
-    queue_point = _entry_queue_point(cars, car, time_minutes)
-
     if state == "scheduled":
-        return (ENTRY_LANE_X, -10)
+        return (ENTRY_LANE_X, 110)
     if state == "entry_queue":
-        return queue_point
+        return _entry_queue_position(cars, car, time_minutes)
     if state == "approaching_gate":
-        return _interpolate_path(_entry_approach_path(queue_point), car.approach_start, car.gate_wait_start, time_minutes)
+        approach_start_point = _entry_queue_target_point(cars, car, car.approach_start or time_minutes)
+        return _interpolate_path(_entry_approach_path(approach_start_point), car.approach_start, car.gate_wait_start, time_minutes)
     if state == "gate_wait":
         return _entry_stop_point()
     if state == "gate_crossing":
         return _interpolate_path(
-            _gate_crossing_path(),
+            _gate_crossing_path(slot),
             car.gate_cross_start,
             car.search_start or car.denied_time,
             time_minutes,
@@ -629,12 +637,29 @@ def _car_position(
     return offscreen
 
 
-def _entry_queue_point(cars: list[CarRecord], current_car: CarRecord, reference_time: float) -> tuple[float, float]:
+def _entry_queue_position(cars: list[CarRecord], current_car: CarRecord, reference_time: float) -> tuple[float, float]:
+    target = _entry_queue_target_point(cars, current_car, reference_time)
+    if current_car.entry_queue_time is None:
+        return (ENTRY_LANE_X, 110)
+
+    path = [(ENTRY_LANE_X, 110)]
+    if target[1] <= ENTRY_PATH_BOTTOM_VISIBLE_Y:
+        path.append((ENTRY_LANE_X, ENTRY_PATH_BOTTOM_VISIBLE_Y))
+    path.append(target)
+    return _interpolate_path(
+        path,
+        current_car.entry_queue_time,
+        current_car.entry_queue_time + ENTRY_QUEUE_FILL_MINUTES,
+        reference_time,
+    )
+
+
+def _entry_queue_target_point(cars: list[CarRecord], current_car: CarRecord, reference_time: float) -> tuple[float, float]:
     queue_cars = [
         car
         for car in cars
         if car.arrival_time <= reference_time
-        and (car.approach_start is None or car.approach_start > reference_time or car.id == current_car.id)
+        and (car.approach_start is None or car.approach_start > reference_time)
         and (car.denied_time is None or car.denied_time > reference_time)
         and (car.done_time is None or car.done_time > reference_time)
     ]
@@ -644,40 +669,40 @@ def _entry_queue_point(cars: list[CarRecord], current_car: CarRecord, reference_
     except ValueError:
         queue_idx = 0
 
-    queue_spacing = ENTRY_QUEUE_SPACING
-    lead_queue_y = ENTRY_QUEUE_FRONT_Y
+    # Anchor right behind the stop line.  When the front car leaves the queue
+    # (enters approaching_gate), every remaining car's queue_idx drops by 1 and
+    # they advance forward naturally.  The spacing enforcer prevents overlaps.
     head_gap = 6.0
-    leading_entry_vehicle = next(
-        (
-            _entry_active_position(car, reference_time)
-            for car in cars
-            if car.id != current_car.id and _car_state(car, reference_time) in {"approaching_gate", "gate_wait", "gate_crossing"}
-        ),
-        None,
-    )
-    if leading_entry_vehicle is not None:
-        leading_y = leading_entry_vehicle[1]
-        if leading_y <= 23.0:
-            lead_queue_y = min(lead_queue_y, leading_y - head_gap)
-
-    return (ENTRY_LANE_X, lead_queue_y - queue_idx * queue_spacing)
+    lead_queue_y = ENTRY_STOP_LINE_Y + head_gap
+    return (ENTRY_LANE_X, lead_queue_y + queue_idx * ENTRY_QUEUE_SPACING)
 
 
 def _entry_approach_path(queue_start: tuple[float, float]) -> list[tuple[float, float]]:
+    if queue_start[1] <= ENTRY_PATH_BOTTOM_VISIBLE_Y:
+        return [
+            queue_start,
+            _entry_stop_point(),
+        ]
     return [
         queue_start,
-        (queue_start[0], ENTRY_PATH_TOP_VISIBLE_Y),
-        (queue_start[0], 23.0),
+        (queue_start[0], ENTRY_PATH_BOTTOM_VISIBLE_Y),
         _entry_stop_point(),
     ]
 
 
-def _gate_crossing_path() -> list[tuple[float, float]]:
+def _search_start_point(slot: ParkingSlot | None) -> tuple[float, float]:
+    if slot is not None and slot.row == 0:
+        return (ENTRY_TURN_X, ROW_A_DRIVE_Y)
+    return (ENTRY_TURN_X, MAIN_ROAD_Y)
+
+
+def _gate_crossing_path(slot: ParkingSlot | None = None) -> list[tuple[float, float]]:
     return [
         _entry_stop_point(),
         (ENTRY_LANE_X, ENTRY_GATE_Y),
-        (ENTRY_LANE_X, MAIN_ROAD_Y),
-        (25.0, MAIN_ROAD_Y),
+        (ENTRY_LANE_X, ENTRY_MAIN_ENTRY_Y),
+        (ENTRY_TURN_X, ENTRY_MAIN_ENTRY_Y),
+        _search_start_point(slot),
     ]
 
 
@@ -685,9 +710,9 @@ def _entry_stop_point() -> tuple[float, float]:
     return (ENTRY_LANE_X, ENTRY_STOP_LINE_Y)
 
 
-def _entry_active_position(car: CarRecord, reference_time: float) -> tuple[float, float]:
+def _entry_active_position(car: CarRecord, cars: list[CarRecord], reference_time: float) -> tuple[float, float]:
     state = _car_state(car, reference_time)
-    queue_start = _entry_queue_point(cars=[car], current_car=car, reference_time=reference_time)
+    queue_start = _entry_queue_target_point(cars, car, car.approach_start or reference_time)
     if state == "approaching_gate":
         return _interpolate_path(_entry_approach_path(queue_start), car.approach_start, car.gate_wait_start, reference_time)
     if state == "gate_wait":

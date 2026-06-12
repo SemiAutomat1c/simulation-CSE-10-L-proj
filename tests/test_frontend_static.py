@@ -79,6 +79,12 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn('car.state !== "exiting"', js)
         self.assertIn('car.exit_phase === "road"', js)
 
+    def test_entry_gate_opens_away_from_entry_queue(self) -> None:
+        css = (self.static_dir / "style.css").read_text()
+
+        self.assertIn("transform-origin: 100% 50%", css)
+        self.assertIn(".entry-gate-arm.open {\n  transform: rotate(90deg);\n}", css)
+
 
 if __name__ == "__main__":
     unittest.main()

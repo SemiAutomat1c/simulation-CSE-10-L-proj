@@ -131,11 +131,11 @@ class ParkingSimulationTests(unittest.TestCase):
                 if car["state"] in visible_states:
                     self.assertGreaterEqual(car["x"], 0)
                     self.assertLessEqual(car["x"], 100)
-                    # entry_queue and approaching vehicles may start above the map (negative y)
+                    # entry_queue and approaching vehicles may start below the map before driving upward
                     # exiting vehicles may leave the map vertically before becoming done
                     if car["state"] not in {"entry_queue", "approaching_gate", "exiting"}:
                         self.assertGreaterEqual(car["y"], 0)
-                    if car["state"] != "exiting":
+                    if car["state"] not in {"entry_queue", "approaching_gate", "exiting"}:
                         self.assertLessEqual(car["y"], 88)
 
     def test_baseline_uses_all_car_rows(self) -> None:
@@ -182,7 +182,36 @@ class ParkingSimulationTests(unittest.TestCase):
                 if car["state"] == "entry_queue":
                     self.assertGreaterEqual(car["x"], 7.2)
                     self.assertLessEqual(car["x"], 8.8)
-                    self.assertLessEqual(car["y"], 10.5)
+                    self.assertGreaterEqual(car["y"], 40.0)
+
+    def test_entry_queue_starts_offmap_then_stacks_behind_gate(self) -> None:
+        payload = self.scenario_payload("rush_hour")
+
+        checked = False
+        for frame in payload["frames"]:
+            waiting = [
+                car
+                for car in frame["cars"]
+                if car["state"] == "gate_wait" and abs(car["x"] - 8.0) <= 0.1 and abs(car["y"] - 36.0) <= 0.1
+            ]
+            queued = sorted(
+                [
+                    car
+                    for car in frame["cars"]
+                    if car["state"] == "entry_queue" and abs(car["x"] - 8.0) <= 0.1
+                ],
+                key=lambda car: car["y"],
+            )
+            if not waiting or len(queued) < 2:
+                continue
+            if queued[0]["y"] > 48.0 or queued[1]["y"] > 56.0:
+                continue
+            self.assertLessEqual(queued[0]["y"], 48.0)
+            self.assertLessEqual(queued[1]["y"], 56.0)
+            checked = True
+            break
+
+        self.assertTrue(checked)
 
     def test_entry_queue_uses_single_centerline(self) -> None:
         payload = self.scenario_payload("rush_hour")
@@ -195,7 +224,7 @@ class ParkingSimulationTests(unittest.TestCase):
             xs = {round(car["x"], 2) for car in queued[:6]}
             ys = [car["y"] for car in queued[:6]]
             self.assertEqual(xs, {8.0})
-            self.assertEqual(ys, sorted(ys, reverse=True))
+            self.assertEqual(ys, sorted(ys))
             checked = True
             break
 
@@ -211,17 +240,65 @@ class ParkingSimulationTests(unittest.TestCase):
                 for car in frame["cars"]
                 if car["state"] in {"entry_queue", "approaching_gate", "gate_wait", "gate_crossing"}
                 and abs(car["x"] - 8.0) <= 0.1
-                and car["y"] <= 55.7
+                and car["y"] >= 26.6
             ]
             if len(lane_cars) < 2:
                 continue
-            lane_cars.sort(key=lambda car: car["y"], reverse=True)
+            lane_cars.sort(key=lambda car: car["y"])
             for leader, follower in zip(lane_cars, lane_cars[1:]):
-                self.assertGreaterEqual(leader["y"] - follower["y"], 2.6)
+                self.assertGreaterEqual(follower["y"] - leader["y"], 2.6)
             checked = True
             break
 
         self.assertTrue(checked)
+
+    def test_entry_crossing_uses_main_entry_before_turning_right(self) -> None:
+        payload = self.scenario_payload("baseline")
+
+        gate_crossing_points = [
+            car
+            for frame in payload["frames"]
+            for car in frame["cars"]
+            if car["id"] == 1 and car["state"] == "gate_crossing"
+        ]
+
+        self.assertTrue(gate_crossing_points)
+        self.assertTrue(any(abs(car["x"] - 8.0) <= 0.1 and car["y"] <= 18.0 for car in gate_crossing_points))
+        self.assertTrue(any(car["x"] >= 20.0 and car["y"] <= 18.0 for car in gate_crossing_points))
+        self.assertFalse(any(abs(car["x"] - 8.0) <= 0.1 and car["y"] > 40.0 for car in gate_crossing_points))
+
+    def test_entry_gate_crossing_has_readable_duration(self) -> None:
+        payload = self.scenario_payload("baseline")
+
+        crossing_times = [
+            frame["time_minutes"]
+            for frame in payload["frames"]
+            for car in frame["cars"]
+            if car["id"] == 1 and car["state"] == "gate_crossing"
+        ]
+
+        self.assertTrue(crossing_times)
+        self.assertGreaterEqual(crossing_times[-1] - crossing_times[0], 1.2)
+
+    def test_row_a_vehicles_do_not_visit_row_b_lane_before_parking(self) -> None:
+        payload = self.scenario_payload("baseline")
+        slot_rows = {slot["id"]: slot["row"] for slot in payload["slots"]}
+        row_a_car_id = next(
+            car["id"]
+            for frame in payload["frames"]
+            for car in frame["cars"]
+            if car["slot_id"] is not None and slot_rows[car["slot_id"]] == 0
+        )
+
+        row_a_entry_points = [
+            car
+            for frame in payload["frames"]
+            for car in frame["cars"]
+            if car["id"] == row_a_car_id and car["state"] in {"gate_crossing", "searching"}
+        ]
+
+        self.assertTrue(row_a_entry_points)
+        self.assertFalse(any(abs(car["x"] - 25.0) <= 0.25 and car["y"] > 40.0 for car in row_a_entry_points))
 
     def test_main_road_vehicles_do_not_stack_on_top_of_each_other(self) -> None:
         payload = self.scenario_payload("rush_hour")
@@ -411,7 +488,7 @@ class ParkingSimulationTests(unittest.TestCase):
 
         self.assertEqual(final_exit_directions(first), final_exit_directions(second))
 
-    def test_entry_queue_can_extend_offscreen_above_map(self) -> None:
+    def test_entry_queue_can_extend_offscreen_below_map(self) -> None:
         payload = self.scenario_payload("rush_hour")
 
         found_offscreen_queue = False
@@ -419,13 +496,13 @@ class ParkingSimulationTests(unittest.TestCase):
             queued = [car for car in frame["cars"] if car["state"] == "entry_queue"]
             if not queued:
                 continue
-            if any(car["y"] < 0 for car in queued):
+            if any(car["y"] > 100 for car in queued):
                 found_offscreen_queue = True
                 break
 
         self.assertTrue(found_offscreen_queue)
 
-    def test_first_visible_vehicle_enters_from_top_edge(self) -> None:
+    def test_first_visible_vehicle_appears_in_entry_queue_lane(self) -> None:
         payload = self.scenario_payload("baseline")
 
         first_visible = None
@@ -434,7 +511,9 @@ class ParkingSimulationTests(unittest.TestCase):
                 (
                     item
                     for item in frame["cars"]
-                    if item["id"] == 1 and item["state"] in {"entry_queue", "approaching_gate", "gate_wait", "gate_crossing"} and item["y"] >= 0
+                    if item["id"] == 1
+                    and item["state"] in {"entry_queue", "approaching_gate", "gate_wait", "gate_crossing"}
+                    and item["y"] <= 100
                 ),
                 None,
             )
@@ -443,10 +522,24 @@ class ParkingSimulationTests(unittest.TestCase):
                 break
 
         self.assertIsNotNone(first_visible)
-        self.assertEqual(first_visible["state"], "approaching_gate")
+        self.assertIn(first_visible["state"], {"entry_queue", "approaching_gate"})
         self.assertGreaterEqual(first_visible["x"], 7.2)
         self.assertLessEqual(first_visible["x"], 8.8)
-        self.assertLessEqual(first_visible["y"], 5.0)
+        self.assertGreaterEqual(first_visible["y"], 82.0)
+        self.assertLessEqual(first_visible["y"], 100.0)
+
+    def test_entry_vehicles_face_upward_before_gate(self) -> None:
+        payload = self.scenario_payload("baseline")
+
+        entry_headings = [
+            car["heading"]
+            for frame in payload["frames"]
+            for car in frame["cars"]
+            if car["id"] == 1 and car["state"] in {"entry_queue", "approaching_gate", "gate_wait"}
+        ]
+
+        self.assertTrue(entry_headings)
+        self.assertTrue(all(abs(heading or 0.0) <= 1.0 for heading in entry_headings))
 
     def test_first_vehicle_progresses_through_gate_stop_sequence(self) -> None:
         payload = self.scenario_payload("baseline")
@@ -476,7 +569,7 @@ class ParkingSimulationTests(unittest.TestCase):
         }
 
         self.assertTrue(wait_positions)
-        self.assertEqual(wait_positions, {(8.0, 26.6)})
+        self.assertEqual(wait_positions, {(8.0, 36.0)})
 
 
 if __name__ == "__main__":
