@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mall Parking Flow Simulation</title>
+    <link rel="stylesheet" href="/static/style.css?v=11" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="control-rail">
+        <div class="brand">
+          <span class="kicker">SimPy Parking</span>
+          <h1>Mall Lot Flow</h1>
+          <p>Discrete-event parking simulation with live slot occupancy and queue pressure.</p>
+        </div>
+
+        <section class="panel">
+          <h2>Run</h2>
+          <label class="field">
+            <span>Scenario</span>
+            <select id="scenarioSelect"></select>
+          </label>
+          <div class="button-row">
+            <button id="playPauseButton" class="pixel-button" type="button">Pause</button>
+            <button id="replayButton" class="pixel-button secondary" type="button">Replay</button>
+          </div>
+          <label class="field" style="margin-top: 8px;">
+            <span>Speed: <strong id="speedValue">1.00x</strong></span>
+            <input type="range" id="speedSlider" min="0.25" max="10" step="0.25" value="1.0" class="speed-slider" />
+          </label>
+        </section>
+
+        <section class="panel metrics">
+          <h2>Live Lot</h2>
+          <div class="metric-grid">
+            <div><span>Time</span><strong id="currentTime">0.0 min</strong></div>
+            <div><span>Entry Queue</span><strong id="entryQueue">0</strong></div>
+            <div><span>Available</span><strong id="availableSlots">0</strong></div>
+            <div><span>Exit Queue</span><strong id="exitQueue">0</strong></div>
+          </div>
+        </section>
+
+        <section class="panel summary">
+          <h2>Run Summary</h2>
+          <div><span>Vehicles</span><strong id="metricVehicles">0</strong></div>
+          <div><span>Slots</span><strong id="metricSlots">0</strong></div>
+          <div><span>Avg Search</span><strong id="metricSearch">0 min</strong></div>
+          <div><span>Denied</span><strong id="metricDenied">0</strong></div>
+          <div><span>Peak Occupancy</span><strong id="metricOccupancy">0%</strong></div>
+          <div><span>Exit Complete</span><strong id="metricExitComplete">0 min</strong></div>
+        </section>
+
+        <section class="panel summary">
+          <h2>Vehicle Mix</h2>
+          <div><span>Cars / SUVs</span><strong id="metricCars">0</strong></div>
+          <div><span>Motorcycles</span><strong id="metricMotorcycles">0</strong></div>
+          <div><span>Car Slot Peak</span><strong id="metricCarSlotPeak">0%</strong></div>
+          <div><span>Moto Slot Peak</span><strong id="metricMotoSlotPeak">0%</strong></div>
+          <div><span>Denied Cars</span><strong id="metricDeniedCars">0</strong></div>
+          <div><span>Denied Motos</span><strong id="metricDeniedMotorcycles">0</strong></div>
+        </section>
+      </aside>
+
+      <main class="stage-area">
+        <section id="parkingStage" class="parking-stage parking-map" aria-label="top-down mall parking simulation">
+          <div id="parkingMap" class="map-surface" aria-hidden="true">
+            <div class="entry-zone">MAIN ENTRY</div>
+            <div class="exit-zone">EXIT TO ROAD</div>
+            <div class="mall-footprint">MALL</div>
+            <span class="map-label label-gate">TICKET GATE</span>
+            <span class="map-label label-route">ONE-WAY SEARCH LOOP</span>
+            <span class="map-label label-row-a">CAR PARKING ROW A</span>
+            <span class="map-label label-row-b">CAR PARKING ROW B</span>
+            <span class="map-label label-row-c">CAR PARKING ROW C</span>
+            <span class="map-label label-motorcycle">MOTORCYCLE PARKING</span>
+            <span class="route-arrow arrow-entry">→</span>
+            <span class="route-arrow arrow-mid">→</span>
+            <span class="route-arrow arrow-down">↓</span>
+            <span class="route-arrow arrow-return">←</span>
+            <span class="route-arrow arrow-exit">→</span>
+            <div class="road road-main"></div>
+            <div class="road road-loop"></div>
+            <div class="road road-exit"></div>
+            <div id="entryGateArm" class="gate-arm entry-gate-arm"></div>
+            <div id="exitGateArm" class="exit-gate-arm"></div>
+            <div class="queue-lane entry-lane">ENTRY QUEUE</div>
+            <div class="queue-lane exit-lane">EXIT FLOW</div>
+          </div>
+          <div id="slotLayer" class="slot-layer"></div>
+          <div id="carLayer" class="car-layer"></div>
+          <div class="lot-glow"></div>
+        </section>
+
+        <div class="legend">
+          <span><i class="swatch car"></i> Cars / SUVs</span>
+          <span><i class="swatch motorcycle"></i> Motorcycles</span>
+          <span><i class="swatch searching"></i> Searching</span>
+          <span><i class="swatch parked"></i> Parked</span>
+          <span><i class="swatch exiting"></i> Exiting</span>
+          <span><i class="swatch denied"></i> Full / Denied</span>
+        </div>
+      </main>
+    </div>
+
+    <script src="/static/app.js?v=11" type="module"></script>
+  </body>
+</html>

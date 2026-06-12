@@ -1,0 +1,73 @@
+import unittest
+from pathlib import Path
+
+
+class FrontendStaticTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.static_dir = Path(__file__).resolve().parent.parent / "app" / "static"
+
+    def test_dashboard_contains_required_controls_and_layers(self) -> None:
+        html = (self.static_dir / "index.html").read_text()
+
+        self.assertIn("scenarioSelect", html)
+        self.assertIn("playPauseButton", html)
+        self.assertIn("replayButton", html)
+        self.assertIn("parkingStage", html)
+        self.assertIn("slotLayer", html)
+        self.assertIn("carLayer", html)
+        self.assertIn("metricMotorcycles", html)
+        self.assertIn("Vehicle Mix", html)
+        self.assertIn("parkingMap", html)
+        self.assertIn("MAIN ENTRY", html)
+        self.assertIn("ONE-WAY SEARCH LOOP", html)
+        self.assertIn("EXIT TO ROAD", html)
+
+    def test_css_contains_top_down_lot_visual_hooks(self) -> None:
+        css = (self.static_dir / "style.css").read_text()
+
+        self.assertIn(".parking-stage", css)
+        self.assertIn(".topdown-slot", css)
+        self.assertIn(".topdown-vehicle", css)
+        self.assertIn(".entry-gate", css)
+        self.assertIn(".exit-gate", css)
+        self.assertIn("parking-topdown-sprites-v1-transparent.png", css)
+        self.assertIn("custom-parking-background.png", css)
+        self.assertIn("sliced/car-red.png", css)
+        self.assertIn("sliced/motorcycle-red.png", css)
+        self.assertIn(".parking-map", css)
+        self.assertIn(".route-arrow", css)
+        self.assertIn(".entry-zone", css)
+        self.assertIn(".exit-zone", css)
+        self.assertIn(".vehicle-motorcycle", css)
+        self.assertIn(".vehicle-suv", css)
+        self.assertIn(".vehicle-van", css)
+        self.assertIn(".vehicle-wheel", css)
+        self.assertIn("@keyframes wheel-spin", css)
+        self.assertIn(".vehicle-headlight", css)
+        self.assertIn(".vehicle-brake-light", css)
+        self.assertIn(".map-surface", css)
+
+    def test_frontend_fetches_simulation_and_scenarios(self) -> None:
+        js = (self.static_dir / "app.js").read_text()
+
+        self.assertIn("/api/scenarios", js)
+        self.assertIn("/api/simulation", js)
+        self.assertIn("renderFrame", js)
+        self.assertIn("requestAnimationFrame", js)
+        self.assertIn("vehicle_type", js)
+        self.assertIn("vehicleVisualClass", js)
+        self.assertIn("createVehicleNode", js)
+        self.assertIn("movementAngle", js)
+        self.assertIn("wheels-moving", js)
+        self.assertIn("topdown-vehicle", js)
+
+    def test_frontend_skips_corner_cutting_interpolation_for_gate_exit_turns(self) -> None:
+        js = (self.static_dir / "app.js").read_text()
+
+        self.assertIn("function shouldInterpolatePosition", js)
+        self.assertIn('car.state !== "exiting"', js)
+        self.assertIn('car.exit_phase === "road"', js)
+
+
+if __name__ == "__main__":
+    unittest.main()
