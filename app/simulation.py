@@ -655,25 +655,11 @@ def _entry_queue_position(cars: list[CarRecord], current_car: CarRecord, referen
 
 
 def _entry_queue_target_point(cars: list[CarRecord], current_car: CarRecord, reference_time: float) -> tuple[float, float]:
-    # Cars currently processing through the gate (approaching, waiting, or crossing).
-    # They have left the waiting queue but still occupy the leading slot logically,
-    # so we count them as an index offset to keep the rest of the queue stable.
-    gate_processing_count = sum(
-        1 for car in cars
-        if car.id != current_car.id
-        and car.arrival_time <= reference_time
-        and car.approach_start is not None
-        and car.approach_start <= reference_time
-        and (car.search_start is None or car.search_start > reference_time)
-        and (car.denied_time is None or car.denied_time > reference_time)
-        and (car.done_time is None or car.done_time > reference_time)
-    )
-
     queue_cars = [
         car
         for car in cars
         if car.arrival_time <= reference_time
-        and (car.approach_start is None or car.approach_start > reference_time or car.id == current_car.id)
+        and (car.approach_start is None or car.approach_start > reference_time)
         and (car.denied_time is None or car.denied_time > reference_time)
         and (car.done_time is None or car.done_time > reference_time)
     ]
@@ -683,25 +669,12 @@ def _entry_queue_target_point(cars: list[CarRecord], current_car: CarRecord, ref
     except ValueError:
         queue_idx = 0
 
-    # Offset by gate_processing_count so the queue doesn't jump when the front
-    # car transitions from entry_queue to approaching_gate.
-    effective_idx = queue_idx + gate_processing_count
-
-    # When a car is being processed at the gate, anchor the queue tightly behind the
-    # stop line so it stacks visibly close to the gate.  Once the gate is free the
-    # queue reverts to the default far-field anchor (ENTRY_QUEUE_FRONT_Y).
+    # Anchor right behind the stop line.  When the front car leaves the queue
+    # (enters approaching_gate), every remaining car's queue_idx drops by 1 and
+    # they advance forward naturally.  The spacing enforcer prevents overlaps.
     head_gap = 6.0
-    if gate_processing_count > 0:
-        lead_queue_y = ENTRY_STOP_LINE_Y + head_gap
-    else:
-        lead_queue_y = ENTRY_QUEUE_FRONT_Y
-
-    # Use effective_idx (not queue_idx) so positions stay stable when the front car
-    # leaves entry_queue and enters approaching_gate.
-    raw_y = lead_queue_y + effective_idx * ENTRY_QUEUE_SPACING
-    # Clamp: entry_queue cars must never be placed inside the gate zone.
-    min_safe_y = ENTRY_STOP_LINE_Y + head_gap
-    return (ENTRY_LANE_X, max(raw_y, min_safe_y))
+    lead_queue_y = ENTRY_STOP_LINE_Y + head_gap
+    return (ENTRY_LANE_X, lead_queue_y + queue_idx * ENTRY_QUEUE_SPACING)
 
 
 def _entry_approach_path(queue_start: tuple[float, float]) -> list[tuple[float, float]]:
