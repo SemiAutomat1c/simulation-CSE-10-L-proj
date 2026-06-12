@@ -452,7 +452,7 @@ select:disabled,
 }
 
 .entry-gate-arm.open {
-  transform: rotate(-90deg);
+  transform: rotate(90deg);
 }
 
 .exit-gate-arm {

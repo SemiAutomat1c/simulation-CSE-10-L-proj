@@ -182,9 +182,9 @@ class ParkingSimulationTests(unittest.TestCase):
                 if car["state"] == "entry_queue":
                     self.assertGreaterEqual(car["x"], 7.2)
                     self.assertLessEqual(car["x"], 8.8)
-                    self.assertGreaterEqual(car["y"], 40.0)
+                    self.assertGreaterEqual(car["y"], 82.0)
 
-    def test_entry_queue_fills_lane_behind_gate(self) -> None:
+    def test_entry_queue_starts_from_bottom_instead_of_gate(self) -> None:
         payload = self.scenario_payload("rush_hour")
 
         checked = False
@@ -204,8 +204,8 @@ class ParkingSimulationTests(unittest.TestCase):
             )
             if not waiting or len(queued) < 2:
                 continue
-            self.assertLessEqual(queued[0]["y"], 48.0)
-            self.assertLessEqual(queued[1]["y"], 56.0)
+            self.assertGreaterEqual(queued[0]["y"], 82.0)
+            self.assertGreaterEqual(queued[1]["y"], 88.0)
             checked = True
             break
 
@@ -523,8 +523,8 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertIn(first_visible["state"], {"entry_queue", "approaching_gate"})
         self.assertGreaterEqual(first_visible["x"], 7.2)
         self.assertLessEqual(first_visible["x"], 8.8)
-        self.assertGreaterEqual(first_visible["y"], 40.0)
-        self.assertLessEqual(first_visible["y"], 56.0)
+        self.assertGreaterEqual(first_visible["y"], 82.0)
+        self.assertLessEqual(first_visible["y"], 100.0)
 
     def test_entry_vehicles_face_upward_before_gate(self) -> None:
         payload = self.scenario_payload("baseline")

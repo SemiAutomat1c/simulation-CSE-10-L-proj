@@ -123,7 +123,7 @@ SCENARIO_PROFILES = {
 }
 
 ENTRY_LANE_X = 8.0
-ENTRY_QUEUE_FRONT_Y = 42.0
+ENTRY_QUEUE_FRONT_Y = 88.0
 ENTRY_QUEUE_SPACING = 4.8
 ENTRY_PATH_BOTTOM_VISIBLE_Y = 88.0
 ENTRY_MAIN_ENTRY_Y = 12.0
@@ -661,17 +661,12 @@ def _entry_queue_point(cars: list[CarRecord], current_car: CarRecord, reference_
     if leading_entry_vehicle is not None:
         leading_y = leading_entry_vehicle[1]
         if leading_y >= ENTRY_STOP_LINE_Y:
-            lead_queue_y = leading_y + head_gap
+            lead_queue_y = max(lead_queue_y, leading_y + head_gap)
 
     return (ENTRY_LANE_X, lead_queue_y + queue_idx * queue_spacing)
 
 
 def _entry_approach_path(queue_start: tuple[float, float]) -> list[tuple[float, float]]:
-    if queue_start[1] <= ENTRY_PATH_BOTTOM_VISIBLE_Y:
-        return [
-            queue_start,
-            _entry_stop_point(),
-        ]
     return [
         queue_start,
         (queue_start[0], ENTRY_PATH_BOTTOM_VISIBLE_Y),
