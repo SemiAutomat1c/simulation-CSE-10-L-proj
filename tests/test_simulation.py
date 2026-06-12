@@ -238,6 +238,19 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertTrue(any(car["x"] >= 20.0 and car["y"] <= 18.0 for car in gate_crossing_points))
         self.assertFalse(any(abs(car["x"] - 8.0) <= 0.1 and car["y"] > 40.0 for car in gate_crossing_points))
 
+    def test_entry_gate_crossing_has_readable_duration(self) -> None:
+        payload = self.scenario_payload("baseline")
+
+        crossing_times = [
+            frame["time_minutes"]
+            for frame in payload["frames"]
+            for car in frame["cars"]
+            if car["id"] == 1 and car["state"] == "gate_crossing"
+        ]
+
+        self.assertTrue(crossing_times)
+        self.assertGreaterEqual(crossing_times[-1] - crossing_times[0], 1.2)
+
     def test_main_road_vehicles_do_not_stack_on_top_of_each_other(self) -> None:
         payload = self.scenario_payload("rush_hour")
 
