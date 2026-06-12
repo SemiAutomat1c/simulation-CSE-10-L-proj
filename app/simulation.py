@@ -123,9 +123,9 @@ SCENARIO_PROFILES = {
 }
 
 ENTRY_LANE_X = 8.0
-ENTRY_QUEUE_FRONT_Y = -4.0
+ENTRY_QUEUE_FRONT_Y = 88.0
 ENTRY_QUEUE_SPACING = 4.8
-ENTRY_PATH_TOP_VISIBLE_Y = 2.0
+ENTRY_PATH_BOTTOM_VISIBLE_Y = 88.0
 ENTRY_GATE_Y = 29.5
 ENTRY_STOP_LINE_Y = 26.6
 MAIN_ROAD_Y = 55.7
@@ -510,7 +510,7 @@ def _car_heading(car: CarRecord, cars: list[CarRecord], slots: list[ParkingSlot]
         return slot.angle
 
     if state in {"entry_queue", "gate_wait"}:
-        return 180.0
+        return 0.0
 
     if state not in {"approaching_gate", "gate_crossing", "searching", "exiting", "denied"}:
         return None
@@ -603,7 +603,7 @@ def _car_position(
     queue_point = _entry_queue_point(cars, car, time_minutes)
 
     if state == "scheduled":
-        return (ENTRY_LANE_X, -10)
+        return (ENTRY_LANE_X, 110)
     if state == "entry_queue":
         return queue_point
     if state == "approaching_gate":
@@ -657,17 +657,16 @@ def _entry_queue_point(cars: list[CarRecord], current_car: CarRecord, reference_
     )
     if leading_entry_vehicle is not None:
         leading_y = leading_entry_vehicle[1]
-        if leading_y <= 23.0:
-            lead_queue_y = min(lead_queue_y, leading_y - head_gap)
+        if leading_y >= ENTRY_STOP_LINE_Y:
+            lead_queue_y = max(lead_queue_y, leading_y + head_gap)
 
-    return (ENTRY_LANE_X, lead_queue_y - queue_idx * queue_spacing)
+    return (ENTRY_LANE_X, lead_queue_y + queue_idx * queue_spacing)
 
 
 def _entry_approach_path(queue_start: tuple[float, float]) -> list[tuple[float, float]]:
     return [
         queue_start,
-        (queue_start[0], ENTRY_PATH_TOP_VISIBLE_Y),
-        (queue_start[0], 23.0),
+        (queue_start[0], ENTRY_PATH_BOTTOM_VISIBLE_Y),
         _entry_stop_point(),
     ]
 
