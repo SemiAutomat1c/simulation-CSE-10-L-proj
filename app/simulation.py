@@ -163,10 +163,13 @@ EXIT_QUEUE_LANE_X = 88.5
 # and merge into the TAIL from the side, never driving through the cars in line.
 EXIT_QUEUE_APPROACH_X = 85.5
 # When the column would run off the bottom of the map it wraps left along the
-# bottom return road at this y; overflow cars queue horizontally there.
-EXIT_QUEUE_WRAP_Y = 78.0
+# lower perimeter road at this y (below Row C); overflow cars queue there.
+EXIT_QUEUE_WRAP_Y = 84.0
+# Lowest car of the vertical column before the queue wraps. Kept on the straight
+# exit road above the curve so the column doesn't spill onto the median.
+EXIT_QUEUE_COLUMN_BOTTOM_Y = 75.0
 # Horizontal staging lane (above the wrap road) for joining the wrapped tail.
-EXIT_QUEUE_APPROACH_Y = 74.5
+EXIT_QUEUE_APPROACH_Y = 80.0
 EXIT_THROAT_POINT = (EXIT_QUEUE_LANE_X, EXIT_GATE_ROAD_Y)
 EXIT_STOP_POINT = (EXIT_QUEUE_LANE_X, 41.0)
 EXIT_GATE_BASE_POINT = (EXIT_STOP_POINT[0], EXIT_GATE_ROAD_Y)
@@ -658,6 +661,11 @@ def _car_heading(car: CarRecord, cars: list[CarRecord], slots: list[ParkingSlot]
 
     if abs(dx) + abs(dy) < 1e-5:
         if state == "exit_queue":
+            # Wrapped cars sit along the bottom road facing the corner (horizontal);
+            # the vertical column faces the gate (up).
+            pos = _car_position(car, cars, slots, time_minutes, state)
+            if pos[1] >= EXIT_QUEUE_WRAP_Y - 1.5 and pos[0] <= EXIT_QUEUE_LANE_X - 1.0:
+                return 90.0
             return 0.0
         return slot.angle if slot is not None else 90.0
 
@@ -895,7 +903,7 @@ def _exit_queue_position(
 
 def _exit_queue_vertical_capacity() -> int:
     """How many cars fit in the vertical column before the queue wraps."""
-    return int((EXIT_QUEUE_WRAP_Y - EXIT_GATE_ROAD_Y) // EXIT_VERT_QUEUE_SPACING) + 1
+    return int((EXIT_QUEUE_COLUMN_BOTTOM_Y - EXIT_GATE_ROAD_Y) // EXIT_VERT_QUEUE_SPACING) + 1
 
 
 def _exit_queue_slot_point(index: int) -> tuple[float, float]:
