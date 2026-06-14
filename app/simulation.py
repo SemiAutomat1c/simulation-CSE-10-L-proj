@@ -162,6 +162,11 @@ EXIT_QUEUE_LANE_X = 88.5
 # Staging lane in the left half of the exit road: joining vehicles descend here
 # and merge into the TAIL from the side, never driving through the cars in line.
 EXIT_QUEUE_APPROACH_X = 85.5
+# When the column would run off the bottom of the map it wraps left along the
+# bottom return road at this y; overflow cars queue horizontally there.
+EXIT_QUEUE_WRAP_Y = 78.0
+# Horizontal staging lane (above the wrap road) for joining the wrapped tail.
+EXIT_QUEUE_APPROACH_Y = 74.5
 EXIT_THROAT_POINT = (EXIT_QUEUE_LANE_X, EXIT_GATE_ROAD_Y)
 EXIT_STOP_POINT = (EXIT_QUEUE_LANE_X, 41.0)
 EXIT_GATE_BASE_POINT = (EXIT_STOP_POINT[0], EXIT_GATE_ROAD_Y)
@@ -174,6 +179,7 @@ EXIT_ROAD_DOWN_ENTRY_Y = 63.4
 EXIT_ROAD_TOP_Y = -12.0
 EXIT_ROAD_BOTTOM_Y = 112.0
 EXIT_VERT_QUEUE_SPACING = 6.4
+EXIT_HORIZ_QUEUE_SPACING = 6.4
 
 
 def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
@@ -521,13 +527,21 @@ def _apply_vehicle_spacing(car_payload: list[dict]) -> None:
         direction=1,
         minimum_gap=DRIVING_LANE_MIN_GAP,
     )
-    # Unified vertical exit queue in the exit flow lane at x≈89
+    # Unified vertical exit queue on the exit road (above the wrap point).
     _enforce_lane_spacing(
         car_payload,
         lambda car: car["state"] == "exit_queue" and abs(car["x"] - EXIT_QUEUE_LANE_X) <= 1.0 and car["y"] >= EXIT_GATE_ROAD_Y,
         axis="y",
         direction=-1,
         minimum_gap=EXIT_VERT_QUEUE_SPACING,
+    )
+    # Wrapped exit queue running left along the bottom road (leader nearest corner).
+    _enforce_lane_spacing(
+        car_payload,
+        lambda car: car["state"] == "exit_queue" and abs(car["y"] - EXIT_QUEUE_WRAP_Y) <= 1.0 and car["x"] <= EXIT_QUEUE_LANE_X - 3.0,
+        axis="x",
+        direction=1,
+        minimum_gap=EXIT_HORIZ_QUEUE_SPACING,
     )
     _enforce_lane_spacing(
         car_payload,
@@ -879,8 +893,24 @@ def _exit_queue_position(
     )
 
 
+def _exit_queue_vertical_capacity() -> int:
+    """How many cars fit in the vertical column before the queue wraps."""
+    return int((EXIT_QUEUE_WRAP_Y - EXIT_GATE_ROAD_Y) // EXIT_VERT_QUEUE_SPACING) + 1
+
+
+def _exit_queue_slot_point(index: int) -> tuple[float, float]:
+    """Position of the Nth car in the exit queue: straight down the exit road,
+    then wrapping left along the bottom return road once the column is full."""
+    n_vert = _exit_queue_vertical_capacity()
+    if index < n_vert:
+        return (EXIT_QUEUE_LANE_X, EXIT_GATE_ROAD_Y + index * EXIT_VERT_QUEUE_SPACING)
+    h = index - n_vert + 1
+    return (EXIT_QUEUE_LANE_X - h * EXIT_HORIZ_QUEUE_SPACING, EXIT_QUEUE_WRAP_Y)
+
+
 def _exit_queue_target_point(cars: list[CarRecord], current_car: CarRecord, reference_time: float) -> tuple[float, float]:
-    """Unified vertical queue in the exit flow lane at x=EXIT_QUEUE_LANE_X."""
+    """Unified exit queue: a vertical column on the exit road that wraps left
+    along the bottom road when it would otherwise run off the map."""
     queue_cars = [
         car
         for car in cars
@@ -908,7 +938,30 @@ def _exit_queue_target_point(cars: list[CarRecord], current_car: CarRecord, refe
         for car in cars
     )
     offset = 1 if throat_busy else 0
-    return (EXIT_QUEUE_LANE_X, EXIT_GATE_ROAD_Y + (queue_idx + offset) * EXIT_VERT_QUEUE_SPACING)
+    return _exit_queue_slot_point(queue_idx + offset)
+
+
+def _exit_queue_merge_path(queue_target: tuple[float, float]) -> list[tuple[float, float]]:
+    """Final approach from the main-road collector into the tail of the queue,
+    merging from the side so the joining car never drives through the line.
+
+    Vertical tail: descend the staging lane (left of the column), step right in.
+    Wrapped tail: descend the staging lane to the horizontal staging lane (above
+    the bottom road), run left to the tail column, then drop into the slot.
+    """
+    tx, ty = queue_target
+    if tx >= EXIT_QUEUE_LANE_X - 0.01:
+        return [
+            (EXIT_QUEUE_APPROACH_X, MAIN_ROAD_Y),
+            (EXIT_QUEUE_APPROACH_X, ty),
+            queue_target,
+        ]
+    return [
+        (EXIT_QUEUE_APPROACH_X, MAIN_ROAD_Y),
+        (EXIT_QUEUE_APPROACH_X, EXIT_QUEUE_APPROACH_Y),
+        (tx, EXIT_QUEUE_APPROACH_Y),
+        queue_target,
+    ]
 
 
 def _slot_to_exit_queue_path(
@@ -924,13 +977,7 @@ def _slot_to_exit_queue_path(
     Right-edge connector lanes (x=85 from the top rows, x=77.5 from the bottom
     row) are reused to reach the main road; see _apply_vehicle_spacing.
     """
-    # Collect on the main road, descend the staging lane to the tail's height,
-    # then step right into the column at the queue slot.
-    merge = [
-        (EXIT_QUEUE_APPROACH_X, MAIN_ROAD_Y),
-        (EXIT_QUEUE_APPROACH_X, queue_target[1]),
-        queue_target,
-    ]
+    merge = _exit_queue_merge_path(queue_target)
     # Denied vehicles are already coasting along the main road toward the column.
     if slot is None:
         return merge
