@@ -617,11 +617,11 @@ class ParkingSimulationTests(unittest.TestCase):
             for car in frame["cars"]
             if car["state"] == "exiting"
             and car["exit_phase"] == "merge"
-            and 89.0 <= car["x"] <= 94.0
+            and 88.0 <= car["x"] <= 95.0
             and abs(car["y"] - actual_gate_y) <= 0.25
         ]
 
-        self.assertEqual(EXIT_STOP_POINT, (89.0, actual_gate_y))
+        self.assertEqual(EXIT_STOP_POINT, (88.5, actual_gate_y))
         self.assertTrue(gate_crossing_frames)
 
     def test_outside_road_uses_distinct_lanes_for_up_and_down_traffic(self) -> None:

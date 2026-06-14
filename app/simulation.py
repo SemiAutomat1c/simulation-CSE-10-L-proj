@@ -157,8 +157,13 @@ EXIT_MERGE_MINUTES = 1.5
 EXIT_ROAD_DRIVE_MINUTES = 5.0
 DENIED_EXIT_APPROACH_MINUTES = 2.5
 EXIT_GATE_ROAD_Y = 48.5
-EXIT_THROAT_POINT = (85.0, EXIT_GATE_ROAD_Y)
-EXIT_STOP_POINT = (89.0, 41.0)
+# Single vertical exit queue, centered on the painted exit road (dashed line).
+EXIT_QUEUE_LANE_X = 88.5
+# Staging lane in the left half of the exit road: joining vehicles descend here
+# and merge into the TAIL from the side, never driving through the cars in line.
+EXIT_QUEUE_APPROACH_X = 85.5
+EXIT_THROAT_POINT = (EXIT_QUEUE_LANE_X, EXIT_GATE_ROAD_Y)
+EXIT_STOP_POINT = (EXIT_QUEUE_LANE_X, 41.0)
 EXIT_GATE_BASE_POINT = (EXIT_STOP_POINT[0], EXIT_GATE_ROAD_Y)
 EXIT_LEFT_TURN_POINT = (91.2, 45.6)
 EXIT_RIGHT_TURN_POINT = (91.2, 58.9)
@@ -169,7 +174,6 @@ EXIT_ROAD_DOWN_ENTRY_Y = 63.4
 EXIT_ROAD_TOP_Y = -12.0
 EXIT_ROAD_BOTTOM_Y = 112.0
 EXIT_VERT_QUEUE_SPACING = 6.4
-EXIT_QUEUE_LANE_X = 89.0
 
 
 def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
@@ -717,7 +721,7 @@ def _car_position(
     if state == "exiting":
         return _exit_position(car, cars, time_minutes)
     if state == "denied":
-        denied_approach = [(25.0, MAIN_ROAD_Y), (EXIT_QUEUE_LANE_X, MAIN_ROAD_Y)]
+        denied_approach = [(25.0, MAIN_ROAD_Y), (EXIT_QUEUE_APPROACH_X, MAIN_ROAD_Y)]
         return _interpolate_path(denied_approach, car.denied_time, car.exit_request, time_minutes)
     return offscreen
 
@@ -863,11 +867,10 @@ def _exit_queue_position(
     )
     if time_minutes >= queue_arrival:
         return queue_target
+    # Denied and parked vehicles share one approach: a single collector along the
+    # main road that merges into the exit column at one join point (no crossing).
     is_denied = car.denied_time is not None and car.slot_id is None
-    if is_denied:
-        path = [(EXIT_QUEUE_LANE_X, MAIN_ROAD_Y), queue_target]
-    else:
-        path = _slot_to_exit_queue_path(slot, slot_point, queue_target)
+    path = _slot_to_exit_queue_path(None if is_denied else slot, slot_point, queue_target)
     return _interpolate_path(
         path,
         car.exit_request,
@@ -891,7 +894,21 @@ def _exit_queue_target_point(cars: list[CarRecord], current_car: CarRecord, refe
         queue_idx = queue_cars.index(current_car)
     except ValueError:
         queue_idx = 0
-    return (EXIT_QUEUE_LANE_X, EXIT_GATE_ROAD_Y + queue_idx * EXIT_VERT_QUEUE_SPACING)
+
+    # While the front car is still pulling out of the head slot toward the gate
+    # (its "approach" phase), hold the rest of the queue back by one slot so the
+    # next car doesn't advance into space the exiting car hasn't vacated yet.
+    # The car doing the exiting must not count itself, or it would start its
+    # approach one slot too far back.
+    throat_busy = any(
+        car.id != current_car.id
+        and car.exit_start is not None
+        and car.exit_start <= reference_time
+        and (car.exit_wait_start is None or car.exit_wait_start > reference_time)
+        for car in cars
+    )
+    offset = 1 if throat_busy else 0
+    return (EXIT_QUEUE_LANE_X, EXIT_GATE_ROAD_Y + (queue_idx + offset) * EXIT_VERT_QUEUE_SPACING)
 
 
 def _slot_to_exit_queue_path(
@@ -899,17 +916,33 @@ def _slot_to_exit_queue_path(
     slot_point: tuple[float, float],
     queue_target: tuple[float, float],
 ) -> list[tuple[float, float]]:
+    """Funnel every vehicle onto the main-road collector, then down a staging
+    lane into the TAIL of the exit column.  All exiting vehicles share this single
+    stream so denied and parked cars form one line without crossing, and a joining
+    vehicle merges into the back from the side instead of driving through the line.
+
+    Right-edge connector lanes (x=85 from the top rows, x=77.5 from the bottom
+    row) are reused to reach the main road; see _apply_vehicle_spacing.
+    """
+    # Collect on the main road, descend the staging lane to the tail's height,
+    # then step right into the column at the queue slot.
+    merge = [
+        (EXIT_QUEUE_APPROACH_X, MAIN_ROAD_Y),
+        (EXIT_QUEUE_APPROACH_X, queue_target[1]),
+        queue_target,
+    ]
+    # Denied vehicles are already coasting along the main road toward the column.
     if slot is None:
-        return [slot_point, queue_target]
-    elif slot.slot_type == "motorcycle_slot":
-        return [slot_point, (slot.x, 20), (EXIT_QUEUE_LANE_X, 20), queue_target]
-    elif slot.row == 0:
-        return [slot_point, (slot.x, 35), (EXIT_QUEUE_LANE_X, 35), queue_target]
-    elif slot.row == 1:
-        return [slot_point, (slot.x, EXIT_GATE_ROAD_Y), (EXIT_QUEUE_LANE_X, EXIT_GATE_ROAD_Y), queue_target]
-    elif slot.row == 2:
-        return [slot_point, (slot.x, 78.5), (EXIT_QUEUE_LANE_X, 78.5), queue_target]
-    return [slot_point, (slot.x, EXIT_GATE_ROAD_Y), (EXIT_QUEUE_LANE_X, EXIT_GATE_ROAD_Y), queue_target]
+        return merge
+    if slot.slot_type == "motorcycle_slot":
+        return [slot_point, (slot.x, 20), (85.0, 20), (85.0, MAIN_ROAD_Y), *merge]
+    if slot.row == 0:
+        return [slot_point, (slot.x, 35), (85.0, 35), (85.0, MAIN_ROAD_Y), *merge]
+    if slot.row == 1:
+        return [slot_point, (slot.x, MAIN_ROAD_Y), *merge]
+    if slot.row == 2:
+        return [slot_point, (slot.x, 72.0), (77.5, 72.0), (77.5, MAIN_ROAD_Y), *merge]
+    return [slot_point, (slot.x, MAIN_ROAD_Y), *merge]
 
 
 def _exit_approach_path(car: CarRecord, cars: list[CarRecord]) -> list[tuple[float, float]]:
