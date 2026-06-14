@@ -167,6 +167,7 @@ function updateSlots(frame) {
     const node = slotNodes.get(slot.id);
     if (!node) return;
     node.className = slotClass(slot);
+    node.style.zIndex = slot.state === "unavailable" ? "260" : `${100 + slot.row}`;
   });
 }
 
@@ -182,7 +183,7 @@ function shouldInterpolatePosition(car, nextCar) {
   if (car.state !== "exiting") return true;
 
   // Respect the backend's lane-following exit path through the gate area.
-  return car.exit_phase === "road" && nextCar.exit_phase === "road";
+  return car.exit_phase === nextCar.exit_phase && ["merge", "road"].includes(car.exit_phase);
 }
 
 function renderFrame(frame, nextFrame, subProgress) {
@@ -215,7 +216,7 @@ function renderFrame(frame, nextFrame, subProgress) {
     // Sub-frame interpolation between current and next frame
     let interpX = car.x;
     let interpY = car.y;
-    const movingStates = new Set(["approaching_gate", "gate_crossing", "searching", "exiting", "denied"]);
+    const movingStates = new Set(["approaching_gate", "gate_crossing", "searching", "exit_queue", "exiting", "denied"]);
     if (nextFrame && subProgress > 0 && movingStates.has(car.state)) {
       const nextCar = nextFrame.cars.find((c) => c.id === car.id);
       if (nextCar && movingStates.has(nextCar.state) && shouldInterpolatePosition(car, nextCar)) {

@@ -562,6 +562,51 @@ select:disabled,
   box-shadow: 0 0 12px rgba(77, 255, 231, 0.7);
 }
 
+.topdown-slot.unavailable {
+  opacity: 1;
+  width: 24px;
+  height: 40px;
+  border-color: rgba(42, 8, 4, 0.96);
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(255, 205, 61, 0.98) 0 6px,
+      rgba(184, 35, 24, 0.98) 6px 12px
+    );
+  filter: saturate(1.35) contrast(1.12);
+  box-shadow:
+    0 0 0 2px rgba(255, 245, 180, 0.95),
+    0 0 13px rgba(184, 35, 24, 0.72),
+    0 3px 6px rgba(0, 0, 0, 0.42);
+}
+
+.topdown-slot.slot-motorcycle.unavailable {
+  width: 16px;
+  height: 28px;
+}
+
+.topdown-slot.unavailable::before,
+.topdown-slot.unavailable::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 155%;
+  height: 5px;
+  background: rgba(255, 250, 226, 0.98);
+  border: 1px solid rgba(31, 8, 4, 0.86);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.38);
+  transform-origin: 50% 50%;
+}
+
+.topdown-slot.unavailable::before {
+  transform: translate(-50%, -50%) rotate(35deg);
+}
+
+.topdown-slot.unavailable::after {
+  transform: translate(-50%, -50%) rotate(-35deg);
+}
+
 .topdown-slot.occupied {
   opacity: 0;
 }

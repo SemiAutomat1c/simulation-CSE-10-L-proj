@@ -1,6 +1,13 @@
 import unittest
 
-from app.simulation import EXIT_STOP_POINT, ParkingSimulationConfig, run_simulation
+from app.simulation import (
+    EXIT_GATE_ROAD_Y,
+    EXIT_QUEUE_LANE_X,
+    EXIT_STOP_POINT,
+    EXIT_VERT_QUEUE_SPACING,
+    ParkingSimulationConfig,
+    run_simulation,
+)
 
 
 class ParkingSimulationTests(unittest.TestCase):
@@ -41,6 +48,55 @@ class ParkingSimulationTests(unittest.TestCase):
 
         self.assertGreater(payload["metrics"]["denied_cars"], 0)
         self.assertLess(payload["metrics"]["total_completed_cars"], payload["metrics"]["total_cars"])
+
+    def test_limited_slots_renders_full_map_with_blocked_spaces(self) -> None:
+        payload = self.scenario_payload("limited_slots")
+        first_frame_slots = payload["frames"][0]["slots"]
+
+        self.assertEqual(len(payload["slots"]), 72)
+        self.assertEqual(payload["metrics"]["visible_slot_count"], 72)
+        self.assertEqual(payload["metrics"]["total_slots"], 16)
+        self.assertEqual(sum(1 for slot in first_frame_slots if slot["state"] == "unavailable"), 56)
+        self.assertEqual(sum(1 for slot in first_frame_slots if slot["state"] == "free"), 16)
+
+    def test_unavailable_limited_slots_are_never_assigned_to_vehicles(self) -> None:
+        payload = self.scenario_payload("limited_slots")
+        unavailable_slot_ids = {
+            slot["id"]
+            for slot in payload["frames"][0]["slots"]
+            if slot["state"] == "unavailable"
+        }
+        assigned_slot_ids = {
+            car["slot_id"]
+            for frame in payload["frames"]
+            for car in frame["cars"]
+            if car["slot_id"] is not None
+        }
+
+        self.assertTrue(unavailable_slot_ids)
+        self.assertTrue(assigned_slot_ids)
+        self.assertTrue(unavailable_slot_ids.isdisjoint(assigned_slot_ids))
+
+    def test_rush_hour_entry_pressure_is_visible_early(self) -> None:
+        payload = self.scenario_payload("rush_hour")
+        max_entry_queue = payload["metrics"]["max_entry_queue_length"]
+        first_peak_time = next(
+            frame["time_minutes"]
+            for frame in payload["frames"]
+            if frame["current_entry_queue"] == max_entry_queue
+        )
+
+        self.assertGreaterEqual(max_entry_queue, 50)
+        self.assertLessEqual(first_peak_time, 20.0)
+
+    def test_slow_entry_queue_is_visibly_stronger_than_baseline(self) -> None:
+        baseline = self.scenario_payload("baseline")
+        slow_entry = self.scenario_payload("slow_entry")
+
+        self.assertGreaterEqual(
+            slow_entry["metrics"]["max_entry_queue_length"],
+            baseline["metrics"]["max_entry_queue_length"] + 12,
+        )
 
     def test_payload_contains_metrics_slots_and_timeline(self) -> None:
         payload = self.scenario_payload("baseline")
@@ -131,11 +187,11 @@ class ParkingSimulationTests(unittest.TestCase):
                 if car["state"] in visible_states:
                     self.assertGreaterEqual(car["x"], 0)
                     self.assertLessEqual(car["x"], 100)
-                    # entry_queue and approaching vehicles may start below the map before driving upward
-                    # exiting vehicles may leave the map vertically before becoming done
-                    if car["state"] not in {"entry_queue", "approaching_gate", "exiting"}:
+                    # entry_queue/approaching vehicles may start below the map before driving upward.
+                    # exit_queue/exiting vehicles may extend down the exit road during heavy congestion.
+                    if car["state"] not in {"entry_queue", "approaching_gate", "exit_queue", "exiting", "denied"}:
                         self.assertGreaterEqual(car["y"], 0)
-                    if car["state"] not in {"entry_queue", "approaching_gate", "exiting"}:
+                    if car["state"] not in {"entry_queue", "approaching_gate", "exit_queue", "exiting", "denied"}:
                         self.assertLessEqual(car["y"], 88)
 
     def test_baseline_uses_all_car_rows(self) -> None:
@@ -399,6 +455,106 @@ class ParkingSimulationTests(unittest.TestCase):
             for left, right in zip(raised_lane_cars, raised_lane_cars[1:]):
                 self.assertGreaterEqual(right["x"] - left["x"], 2.6)
 
+    def test_exit_congestion_shows_physical_vertical_exit_queue_on_exit_road(self) -> None:
+        payload = self.scenario_payload("exit_congestion")
+        max_visible_exit_queue = max(
+            sum(
+                1
+                for car in frame["cars"]
+                if car["state"] == "exit_queue"
+                and abs(car["x"] - EXIT_QUEUE_LANE_X) <= 0.25
+                and car["y"] >= EXIT_GATE_ROAD_Y
+            )
+            for frame in payload["frames"]
+        )
+
+        self.assertGreaterEqual(max_visible_exit_queue, 4)
+
+    def test_exit_queue_vehicles_are_not_drawn_on_their_released_slots(self) -> None:
+        payload = self.scenario_payload("exit_congestion")
+        slot_positions = {slot["id"]: (slot["x"], slot["y"]) for slot in payload["slots"]}
+        frame_with_visible_queue = next(
+            frame
+            for frame in payload["frames"]
+            if sum(
+                1
+                for car in frame["cars"]
+                if car["state"] == "exit_queue"
+                and abs(car["x"] - EXIT_QUEUE_LANE_X) <= 0.25
+                and car["y"] >= EXIT_GATE_ROAD_Y
+            )
+            >= 4
+        )
+
+        for car in frame_with_visible_queue["cars"]:
+            if car["state"] != "exit_queue" or car["slot_id"] is None:
+                continue
+            slot_x, slot_y = slot_positions[car["slot_id"]]
+            self.assertTrue(abs(car["x"] - slot_x) > 2.0 or abs(car["y"] - slot_y) > 2.0)
+
+    def test_exit_queue_uses_one_vertical_lane_for_denied_and_parked_vehicles(self) -> None:
+        payload = self.scenario_payload("limited_slots")
+
+        shared_queue_frame = next(
+            frame
+            for frame in payload["frames"]
+            if any(
+                car["state"] == "exit_queue"
+                and car["slot_id"] is None
+                and abs(car["x"] - EXIT_QUEUE_LANE_X) <= 0.25
+                for car in frame["cars"]
+            )
+            and any(
+                car["state"] == "exit_queue"
+                and car["slot_id"] is not None
+                and abs(car["x"] - EXIT_QUEUE_LANE_X) <= 0.25
+                for car in frame["cars"]
+            )
+        )
+        queued = [
+            car
+            for car in shared_queue_frame["cars"]
+            if car["state"] == "exit_queue" and abs(car["x"] - EXIT_QUEUE_LANE_X) <= 0.25
+        ]
+
+        self.assertTrue(any(car["slot_id"] is None for car in queued))
+        self.assertTrue(any(car["slot_id"] is not None for car in queued))
+        self.assertTrue(all(car["y"] >= EXIT_GATE_ROAD_Y for car in queued))
+
+    def test_exit_queue_spacing_is_vertical_not_crossing_horizontal_lane(self) -> None:
+        payload = self.scenario_payload("exit_congestion")
+        frame_with_queue = max(
+            payload["frames"],
+            key=lambda frame: sum(1 for car in frame["cars"] if car["state"] == "exit_queue"),
+        )
+        queued = sorted(
+            [
+                car
+                for car in frame_with_queue["cars"]
+                if car["state"] == "exit_queue" and abs(car["x"] - EXIT_QUEUE_LANE_X) <= 0.25
+            ],
+            key=lambda car: car["y"],
+        )
+
+        self.assertGreaterEqual(len(queued), 4)
+        for front, behind in zip(queued, queued[1:]):
+            self.assertGreaterEqual(behind["y"] - front["y"], EXIT_VERT_QUEUE_SPACING - 0.05)
+
+    def test_released_exit_queue_slot_can_become_free_before_vehicle_done(self) -> None:
+        payload = self.scenario_payload("exit_congestion")
+
+        found_released_free_slot = False
+        for frame in payload["frames"]:
+            slot_states = {slot["id"]: slot["state"] for slot in frame["slots"]}
+            for car in frame["cars"]:
+                if car["state"] == "exit_queue" and car["slot_id"] is not None and slot_states[car["slot_id"]] == "free":
+                    found_released_free_slot = True
+                    break
+            if found_released_free_slot:
+                break
+
+        self.assertTrue(found_released_free_slot)
+
     def test_only_one_vehicle_occupies_exit_throat_wait_point_at_a_time(self) -> None:
         payload = self.scenario_payload("rush_hour")
 
@@ -450,6 +606,23 @@ class ParkingSimulationTests(unittest.TestCase):
 
         self.assertTrue(saw_up_merge)
         self.assertTrue(saw_down_merge)
+
+    def test_limited_slots_exit_merge_crosses_actual_gate_line(self) -> None:
+        payload = self.scenario_payload("limited_slots")
+        actual_gate_y = 41.0
+
+        gate_crossing_frames = [
+            car
+            for frame in payload["frames"]
+            for car in frame["cars"]
+            if car["state"] == "exiting"
+            and car["exit_phase"] == "merge"
+            and 89.0 <= car["x"] <= 94.0
+            and abs(car["y"] - actual_gate_y) <= 0.25
+        ]
+
+        self.assertEqual(EXIT_STOP_POINT, (89.0, actual_gate_y))
+        self.assertTrue(gate_crossing_frames)
 
     def test_outside_road_uses_distinct_lanes_for_up_and_down_traffic(self) -> None:
         payload = self.scenario_payload("baseline")

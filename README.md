@@ -72,7 +72,7 @@ Unknown scenario names fall back to `baseline`.
 - `gate_crossing`: Vehicle is entering the lot.
 - `searching`: Vehicle is following the search loop toward an assigned slot.
 - `parked`: Vehicle is occupying a slot.
-- `exit_queue`: Vehicle has finished parking and is waiting to leave.
+- `exit_queue`: Vehicle has finished parking, or was denied a slot, and is waiting in the shared exit lane.
 - `exiting`: Vehicle is moving through the exit gate and outside road.
 - `denied`: Vehicle could not park because no compatible slot was available.
 - `done`: Vehicle has completed its path.
@@ -81,7 +81,8 @@ Unknown scenario names fall back to `baseline`.
 
 - `total_vehicle_count`: Total generated vehicles in the run.
 - `total_cars` / `total_motorcycles`: Vehicle mix by type.
-- `total_slots`: Total visible parking capacity.
+- `total_slots`: Usable parking capacity for the selected scenario.
+- `visible_slot_count`: Total rendered parking spaces on the map, including unavailable spaces.
 - `total_completed_vehicles`: Vehicles that successfully parked and completed the exit path.
 - `denied_vehicle_count`: Vehicles denied due to capacity/type constraints.
 - `average_search_time_minutes`: Average time from search start to parking start.

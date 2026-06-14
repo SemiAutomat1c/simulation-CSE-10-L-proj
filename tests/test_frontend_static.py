@@ -15,6 +15,8 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("parkingStage", html)
         self.assertIn("slotLayer", html)
         self.assertIn("carLayer", html)
+        self.assertIn('/static/style.css?v=17', html)
+        self.assertIn('/static/app.js?v=15', html)
         self.assertIn("metricMotorcycles", html)
         self.assertIn("Vehicle Mix", html)
         self.assertIn("simulationStatus", html)
@@ -28,6 +30,10 @@ class FrontendStaticTests(unittest.TestCase):
 
         self.assertIn(".parking-stage", css)
         self.assertIn(".topdown-slot", css)
+        self.assertIn(".topdown-slot.unavailable", css)
+        self.assertIn(".topdown-slot.slot-motorcycle.unavailable", css)
+        self.assertIn("0 0 0 2px rgba(255, 245, 180, 0.95)", css)
+        self.assertIn(".exit-gate-arm {\n  position: absolute;\n  left: 88%;\n  top: 38%;", css)
         self.assertIn(".topdown-vehicle", css)
         self.assertIn(".entry-gate", css)
         self.assertIn(".exit-gate", css)
@@ -71,13 +77,15 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("speedSlider.disabled", js)
         self.assertIn("wheels-moving", js)
         self.assertIn("topdown-vehicle", js)
+        self.assertIn('slot.state === "unavailable"', js)
 
     def test_frontend_skips_corner_cutting_interpolation_for_gate_exit_turns(self) -> None:
         js = (self.static_dir / "app.js").read_text()
 
         self.assertIn("function shouldInterpolatePosition", js)
         self.assertIn('car.state !== "exiting"', js)
-        self.assertIn('car.exit_phase === "road"', js)
+        self.assertIn('"merge"', js)
+        self.assertIn('"road"', js)
 
     def test_entry_gate_opens_away_from_entry_queue(self) -> None:
         css = (self.static_dir / "style.css").read_text()
