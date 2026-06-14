@@ -35,6 +35,7 @@ class CarRecord:
     search_start: float | None = None
     park_start: float | None = None
     exit_request: float | None = None
+    slot_release_time: float | None = None
     exit_start: float | None = None
     exit_wait_start: float | None = None
     exit_merge_start: float | None = None
@@ -86,38 +87,47 @@ SCENARIO_PROFILES = {
     },
     "rush_hour": {
         "seed": 202,
-        "total_cars": 56,
+        "total_cars": 60,
         "slot_count": 72,
         "arrival_mode": "clustered",
-        "entry_service": 0.8,
-        "exit_service": 0.85,
-        "base_search": 1.8,
+        "early_window": (0, 4),
+        "cluster_window": (5, 18),
+        "entry_service": 1.0,
+        "exit_service": 0.95,
+        "base_search": 1.9,
     },
     "limited_slots": {
         "seed": 303,
-        "total_cars": 48,
+        "total_cars": 60,
         "slot_count": 16,
+        "visible_slot_count": 72,
+        "usable_slot_count": 16,
         "arrival_mode": "spread",
         "entry_service": 0.75,
         "exit_service": 0.85,
         "base_search": 1.9,
+        "dwell_range": (46, 82),
     },
     "slow_entry": {
         "seed": 404,
-        "total_cars": 44,
+        "total_cars": 50,
         "slot_count": 72,
         "arrival_mode": "spread",
-        "entry_service": 1.8,
+        "arrival_start": 0,
+        "arrival_end": 58,
+        "entry_service": 3.2,
         "exit_service": 0.8,
         "base_search": 1.5,
     },
     "exit_congestion": {
         "seed": 505,
-        "total_cars": 46,
+        "total_cars": 52,
         "slot_count": 72,
         "arrival_mode": "spread",
+        "arrival_start": 0,
+        "arrival_end": 62,
         "entry_service": 0.7,
-        "exit_service": 2.4,
+        "exit_service": 4.0,
         "base_search": 1.6,
     },
 }
@@ -141,9 +151,11 @@ ENTRY_APPROACH_MINUTES = 0.5
 ENTRY_GATE_PAUSE_MINUTES = 1.0
 ENTRY_GATE_CROSS_MINUTES = 1.35
 EXIT_APPROACH_MINUTES = 2.5
+EXIT_QUEUE_APPROACH_MINUTES = 2.2
 EXIT_GATE_PAUSE_MINUTES = 0.1
 EXIT_MERGE_MINUTES = 1.5
 EXIT_ROAD_DRIVE_MINUTES = 5.0
+DENIED_EXIT_APPROACH_MINUTES = 2.5
 EXIT_GATE_ROAD_Y = 48.5
 EXIT_THROAT_POINT = (85.0, EXIT_GATE_ROAD_Y)
 EXIT_STOP_POINT = (89.0, 41.0)
@@ -156,15 +168,22 @@ EXIT_ROAD_UP_ENTRY_Y = 48.0
 EXIT_ROAD_DOWN_ENTRY_Y = 63.4
 EXIT_ROAD_TOP_Y = -12.0
 EXIT_ROAD_BOTTOM_Y = 112.0
+EXIT_VERT_QUEUE_SPACING = 6.4
+EXIT_QUEUE_LANE_X = 89.0
 
 
 def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
     scenario = config.scenario if config.scenario in SCENARIO_PROFILES else "baseline"
     profile = SCENARIO_PROFILES[scenario]
     rng = random.Random(profile["seed"])
-    slots = _build_slots(profile["slot_count"])
-    free_car_slots = _ordered_car_slot_ids(slots)
-    free_motorcycle_slots = [slot.id for slot in slots if slot.slot_type == "motorcycle_slot"]
+    visible_slot_count = profile.get("visible_slot_count", profile["slot_count"])
+    usable_slot_count = profile.get("usable_slot_count", profile["slot_count"])
+    slots = _build_slots(visible_slot_count)
+    usable_slot_ids = _usable_slot_ids(slots, usable_slot_count)
+    free_car_slots = [slot_id for slot_id in _ordered_car_slot_ids(slots) if slot_id in usable_slot_ids]
+    free_motorcycle_slots = [
+        slot.id for slot in slots if slot.slot_type == "motorcycle_slot" and slot.id in usable_slot_ids
+    ]
     cars = [
         CarRecord(
             id=index + 1,
@@ -198,7 +217,22 @@ def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
 
         if car.slot_id is None:
             car.denied_time = env.now
-            yield env.timeout(4.0)
+            yield env.timeout(DENIED_EXIT_APPROACH_MINUTES)
+
+            car.exit_request = env.now
+            yield env.timeout(EXIT_QUEUE_APPROACH_MINUTES)
+
+            with exit_gate.request() as request:
+                yield request
+                car.exit_start = env.now
+                yield env.timeout(EXIT_APPROACH_MINUTES)
+                car.exit_wait_start = env.now
+                yield env.timeout(EXIT_GATE_PAUSE_MINUTES + _service_time(profile["exit_service"], rng))
+                car.exit_merge_start = env.now
+                yield env.timeout(EXIT_MERGE_MINUTES)
+
+            car.exit_road_start = env.now
+            yield env.timeout(EXIT_ROAD_DRIVE_MINUTES)
             car.done_time = env.now
             return
 
@@ -209,10 +243,13 @@ def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
         yield env.timeout(search_time)
 
         car.park_start = env.now
-        dwell_time = rng.uniform(18, 44)
+        dwell_time = rng.uniform(*profile.get("dwell_range", (18, 44)))
         yield env.timeout(dwell_time)
 
         car.exit_request = env.now
+        _release_slot(car, slots, free_car_slots, free_motorcycle_slots)
+        yield env.timeout(EXIT_QUEUE_APPROACH_MINUTES)
+
         with exit_gate.request() as request:
             yield request
             car.exit_start = env.now
@@ -225,19 +262,13 @@ def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
         car.exit_road_start = env.now
         yield env.timeout(EXIT_ROAD_DRIVE_MINUTES)
         car.done_time = env.now
-        if car.slot_id is not None:
-            released_slot = next(slot for slot in slots if slot.id == car.slot_id)
-            if released_slot.slot_type == "motorcycle_slot":
-                free_motorcycle_slots.append(car.slot_id)
-            else:
-                free_car_slots.append(car.slot_id)
 
     for car in cars:
         env.process(car_process(car))
 
     env.run()
-    frames = _build_frames(slots, cars, config.snapshot_interval_minutes)
-    metrics = _build_metrics(slots, cars, frames)
+    frames = _build_frames(slots, cars, config.snapshot_interval_minutes, usable_slot_ids)
+    metrics = _build_metrics(slots, cars, frames, usable_slot_ids)
     return ParkingSimulationResult(
         scenario=scenario,
         slots=slots,
@@ -309,6 +340,22 @@ def _ordered_car_slot_ids(slots: list[ParkingSlot]) -> list[str]:
     ]
 
 
+def _usable_slot_ids(slots: list[ParkingSlot], usable_slot_count: int) -> set[str]:
+    usable_count = min(max(usable_slot_count, 0), len(slots))
+    if usable_count == 0:
+        return set()
+
+    motorcycle_count = 12 if usable_count >= 72 else min(8, max(4, round(usable_count * 0.25)))
+    motorcycle_count = min(motorcycle_count, sum(1 for slot in slots if slot.slot_type == "motorcycle_slot"))
+    car_count = min(usable_count - motorcycle_count, sum(1 for slot in slots if slot.slot_type == "car_slot"))
+
+    usable_car_slots = _ordered_car_slot_ids(slots)[:car_count]
+    usable_motorcycle_slots = [
+        slot.id for slot in slots if slot.slot_type == "motorcycle_slot"
+    ][:motorcycle_count]
+    return set(usable_car_slots + usable_motorcycle_slots)
+
+
 def _vehicle_type_for_index(index: int, rng: random.Random) -> str:
     if index % 7 == 3:
         return "motorcycle"
@@ -329,13 +376,32 @@ def _reserve_slot(
     return None
 
 
+def _release_slot(
+    car: CarRecord,
+    slots: list[ParkingSlot],
+    free_car_slots: list[str],
+    free_motorcycle_slots: list[str],
+) -> None:
+    if car.slot_id is None or car.slot_release_time is not None:
+        return
+
+    car.slot_release_time = car.exit_request
+    released_slot = next(slot for slot in slots if slot.id == car.slot_id)
+    if released_slot.slot_type == "motorcycle_slot":
+        free_motorcycle_slots.append(car.slot_id)
+    else:
+        free_car_slots.append(car.slot_id)
+
+
 def _arrival_times(profile: dict, rng: random.Random) -> list[float]:
     total = profile["total_cars"]
     if profile["arrival_mode"] == "clustered":
-        early = [rng.uniform(0, 16) for _ in range(total // 4)]
-        cluster = [rng.uniform(18, 34) for _ in range(total - len(early))]
+        early_window = profile.get("early_window", (0, 16))
+        cluster_window = profile.get("cluster_window", (18, 34))
+        early = [rng.uniform(*early_window) for _ in range(total // 5)]
+        cluster = [rng.uniform(*cluster_window) for _ in range(total - len(early))]
         return sorted(early + cluster)
-    return sorted(rng.uniform(0, 68) for _ in range(total))
+    return sorted(rng.uniform(profile.get("arrival_start", 0), profile.get("arrival_end", 68)) for _ in range(total))
 
 
 def _service_time(base: float, rng: random.Random) -> float:
@@ -346,7 +412,12 @@ def _approach_queue_time(rng: random.Random) -> float:
     return 1.0
 
 
-def _build_frames(slots: list[ParkingSlot], cars: list[CarRecord], interval: float) -> list[dict]:
+def _build_frames(
+    slots: list[ParkingSlot],
+    cars: list[CarRecord],
+    interval: float,
+    usable_slot_ids: set[str],
+) -> list[dict]:
     end_time = max(
         [car.done_time or car.denied_time or car.arrival_time for car in cars],
         default=0,
@@ -357,7 +428,7 @@ def _build_frames(slots: list[ParkingSlot], cars: list[CarRecord], interval: flo
         time_minutes = round(step * interval, 2)
         car_payload = [_car_to_frame(car, cars, slots, time_minutes) for car in cars]
         _apply_vehicle_spacing(car_payload)
-        slot_payload = _slots_for_frame(slots, car_payload)
+        slot_payload = _slots_for_frame(slots, car_payload, usable_slot_ids)
         frames.append(
             {
                 "time_minutes": time_minutes,
@@ -446,6 +517,14 @@ def _apply_vehicle_spacing(car_payload: list[dict]) -> None:
         direction=1,
         minimum_gap=DRIVING_LANE_MIN_GAP,
     )
+    # Unified vertical exit queue in the exit flow lane at x≈89
+    _enforce_lane_spacing(
+        car_payload,
+        lambda car: car["state"] == "exit_queue" and abs(car["x"] - EXIT_QUEUE_LANE_X) <= 1.0 and car["y"] >= EXIT_GATE_ROAD_Y,
+        axis="y",
+        direction=-1,
+        minimum_gap=EXIT_VERT_QUEUE_SPACING,
+    )
     _enforce_lane_spacing(
         car_payload,
         lambda car: car["state"] == "exiting" and abs(car["x"] - EXIT_ROAD_UP_X) <= 0.35 and EXIT_ROAD_TOP_Y <= car["y"] <= EXIT_ROAD_UP_ENTRY_Y,
@@ -515,13 +594,13 @@ def _car_to_frame(car: CarRecord, cars: list[CarRecord], slots: list[ParkingSlot
 
 def _car_heading(car: CarRecord, cars: list[CarRecord], slots: list[ParkingSlot], state: str, time_minutes: float) -> float | None:
     slot = next((slot for slot in slots if slot.id == car.slot_id), None)
-    if slot is not None and state in {"parked", "exit_queue"}:
+    if slot is not None and state == "parked":
         return slot.angle
 
     if state in {"entry_queue", "gate_wait"}:
         return 0.0
 
-    if state not in {"approaching_gate", "gate_crossing", "searching", "exiting", "denied"}:
+    if state not in {"approaching_gate", "gate_crossing", "searching", "exit_queue", "exiting", "denied"}:
         return None
 
     if state == "exiting" and _exit_phase(car, time_minutes) == "wait":
@@ -535,10 +614,12 @@ def _car_heading(car: CarRecord, cars: list[CarRecord], slots: list[ParkingSlot]
         t_start, t_end = car.gate_cross_start, car.search_start or car.denied_time
     elif state == "searching":
         t_start, t_end = car.search_start, car.park_start
+    elif state == "exit_queue":
+        t_start, t_end = car.exit_request, car.exit_start
     elif state == "exiting":
         t_start, t_end = car.exit_start, car.done_time
     elif state == "denied":
-        t_start, t_end = car.denied_time, car.done_time
+        t_start, t_end = car.denied_time, car.exit_request or car.done_time
 
     if t_start is None or t_end is None or t_end <= t_start:
         return None
@@ -558,6 +639,8 @@ def _car_heading(car: CarRecord, cars: list[CarRecord], slots: list[ParkingSlot]
         return None
 
     if abs(dx) + abs(dy) < 1e-5:
+        if state == "exit_queue":
+            return 0.0
         return slot.angle if slot is not None else 90.0
 
     # Snap to dominant axis for axis-aligned paths — prevents brief
@@ -579,12 +662,12 @@ def _car_state(car: CarRecord, time_minutes: float) -> str:
         return "scheduled"
     if car.done_time is not None and time_minutes >= car.done_time:
         return "done"
-    if car.denied_time is not None and time_minutes >= car.denied_time:
-        return "denied"
     if car.exit_start is not None and time_minutes >= car.exit_start:
         return "exiting"
     if car.exit_request is not None and time_minutes >= car.exit_request:
         return "exit_queue"
+    if car.denied_time is not None and time_minutes >= car.denied_time:
+        return "denied"
     if car.park_start is not None and time_minutes >= car.park_start:
         return "parked"
     if car.search_start is not None and time_minutes >= car.search_start:
@@ -627,13 +710,15 @@ def _car_position(
         )
     if state == "searching":
         return _interpolate_path(_parking_path(slot, search_start, slot_point), car.search_start, car.park_start, time_minutes)
-    if state in {"parked", "exit_queue"}:
+    if state == "parked":
         return slot_point
+    if state == "exit_queue":
+        return _exit_queue_position(car, cars, slot, slot_point, time_minutes)
     if state == "exiting":
-        return _exit_position(car, slot, slot_point, time_minutes)
+        return _exit_position(car, cars, time_minutes)
     if state == "denied":
-        denied_path = [(25.0, 55.7), (88.0, 55.7), (100.0, 55.7)]
-        return _interpolate_path(denied_path, car.denied_time, car.done_time, time_minutes)
+        denied_approach = [(25.0, MAIN_ROAD_Y), (EXIT_QUEUE_LANE_X, MAIN_ROAD_Y)]
+        return _interpolate_path(denied_approach, car.denied_time, car.exit_request, time_minutes)
     return offscreen
 
 
@@ -764,26 +849,72 @@ def _parking_path(
     return [search_start, (slot.x, 55.7), slot_point]
 
 
-def _exit_approach_path(
+def _exit_queue_position(
     car: CarRecord,
+    cars: list[CarRecord],
     slot: ParkingSlot | None,
     slot_point: tuple[float, float],
-) -> list[tuple[float, float]]:
-    lot_exit_path: list[tuple[float, float]]
-    if slot is None:
-        lot_exit_path = [slot_point, EXIT_THROAT_POINT, EXIT_GATE_BASE_POINT, EXIT_STOP_POINT]
-    elif slot.slot_type == "motorcycle_slot":
-        lot_exit_path = [slot_point, (slot.x, 20), (85.0, 20), EXIT_THROAT_POINT, EXIT_GATE_BASE_POINT, EXIT_STOP_POINT]
-    elif slot.row == 0:
-        lot_exit_path = [slot_point, (slot.x, 35), (85.0, 35), EXIT_THROAT_POINT, EXIT_GATE_BASE_POINT, EXIT_STOP_POINT]
-    elif slot.row == 1:
-        lot_exit_path = [slot_point, (slot.x, EXIT_GATE_ROAD_Y), EXIT_THROAT_POINT, EXIT_GATE_BASE_POINT, EXIT_STOP_POINT]
-    elif slot.row == 2:
-        lot_exit_path = [slot_point, (slot.x, 78.5), (85.0, 78.5), EXIT_THROAT_POINT, EXIT_GATE_BASE_POINT, EXIT_STOP_POINT]
+    time_minutes: float,
+) -> tuple[float, float]:
+    queue_target = _exit_queue_target_point(cars, car, time_minutes)
+    queue_arrival = min(
+        car.exit_start or car.done_time or time_minutes,
+        (car.exit_request or time_minutes) + EXIT_QUEUE_APPROACH_MINUTES,
+    )
+    if time_minutes >= queue_arrival:
+        return queue_target
+    is_denied = car.denied_time is not None and car.slot_id is None
+    if is_denied:
+        path = [(EXIT_QUEUE_LANE_X, MAIN_ROAD_Y), queue_target]
     else:
-        lot_exit_path = [slot_point, (slot.x, EXIT_GATE_ROAD_Y), EXIT_THROAT_POINT, EXIT_GATE_BASE_POINT, EXIT_STOP_POINT]
+        path = _slot_to_exit_queue_path(slot, slot_point, queue_target)
+    return _interpolate_path(
+        path,
+        car.exit_request,
+        queue_arrival,
+        time_minutes,
+    )
 
-    return lot_exit_path
+
+def _exit_queue_target_point(cars: list[CarRecord], current_car: CarRecord, reference_time: float) -> tuple[float, float]:
+    """Unified vertical queue in the exit flow lane at x=EXIT_QUEUE_LANE_X."""
+    queue_cars = [
+        car
+        for car in cars
+        if car.exit_request is not None
+        and car.exit_request <= reference_time
+        and (car.exit_start is None or car.exit_start > reference_time)
+        and (car.done_time is None or car.done_time > reference_time)
+    ]
+    queue_cars.sort(key=lambda car: (car.exit_request or 0, car.id))
+    try:
+        queue_idx = queue_cars.index(current_car)
+    except ValueError:
+        queue_idx = 0
+    return (EXIT_QUEUE_LANE_X, EXIT_GATE_ROAD_Y + queue_idx * EXIT_VERT_QUEUE_SPACING)
+
+
+def _slot_to_exit_queue_path(
+    slot: ParkingSlot | None,
+    slot_point: tuple[float, float],
+    queue_target: tuple[float, float],
+) -> list[tuple[float, float]]:
+    if slot is None:
+        return [slot_point, queue_target]
+    elif slot.slot_type == "motorcycle_slot":
+        return [slot_point, (slot.x, 20), (EXIT_QUEUE_LANE_X, 20), queue_target]
+    elif slot.row == 0:
+        return [slot_point, (slot.x, 35), (EXIT_QUEUE_LANE_X, 35), queue_target]
+    elif slot.row == 1:
+        return [slot_point, (slot.x, EXIT_GATE_ROAD_Y), (EXIT_QUEUE_LANE_X, EXIT_GATE_ROAD_Y), queue_target]
+    elif slot.row == 2:
+        return [slot_point, (slot.x, 78.5), (EXIT_QUEUE_LANE_X, 78.5), queue_target]
+    return [slot_point, (slot.x, EXIT_GATE_ROAD_Y), (EXIT_QUEUE_LANE_X, EXIT_GATE_ROAD_Y), queue_target]
+
+
+def _exit_approach_path(car: CarRecord, cars: list[CarRecord]) -> list[tuple[float, float]]:
+    queue_start = _exit_queue_target_point(cars, car, car.exit_start or 0)
+    return [queue_start, EXIT_GATE_BASE_POINT, EXIT_STOP_POINT]
 
 
 def _exit_merge_path(car: CarRecord) -> list[tuple[float, float]]:
@@ -835,14 +966,13 @@ def _exit_phase(car: CarRecord, reference_time: float) -> str | None:
 
 def _exit_position(
     car: CarRecord,
-    slot: ParkingSlot | None,
-    slot_point: tuple[float, float],
+    cars: list[CarRecord],
     time_minutes: float,
 ) -> tuple[float, float]:
     phase = _exit_phase(car, time_minutes)
     if phase == "approach":
         return _interpolate_path(
-            _exit_approach_path(car, slot, slot_point),
+            _exit_approach_path(car, cars),
             car.exit_start,
             car.exit_wait_start,
             time_minutes,
@@ -904,18 +1034,18 @@ def _point_between(
     )
 
 
-def _slots_for_frame(slots: list[ParkingSlot], car_payload: list[dict]) -> list[dict]:
-    slot_states = {slot.id: "free" for slot in slots}
+def _slots_for_frame(slots: list[ParkingSlot], car_payload: list[dict], usable_slot_ids: set[str]) -> list[dict]:
+    slot_states = {slot.id: "free" if slot.id in usable_slot_ids else "unavailable" for slot in slots}
     for car in car_payload:
         slot_id = car["slot_id"]
         if slot_id is None:
             continue
+        if slot_id not in usable_slot_ids:
+            continue
         if car["state"] == "searching":
             slot_states[slot_id] = "targeted"
-        elif car["state"] in {"parked", "exit_queue"}:
+        elif car["state"] == "parked":
             slot_states[slot_id] = "occupied"
-        elif car["state"] == "exiting":
-            slot_states[slot_id] = "exiting"
     return [
         {
             **_slot_to_dict(slot),
@@ -937,7 +1067,12 @@ def _slot_to_dict(slot: ParkingSlot) -> dict:
     }
 
 
-def _build_metrics(slots: list[ParkingSlot], cars: list[CarRecord], frames: list[dict]) -> dict:
+def _build_metrics(
+    slots: list[ParkingSlot],
+    cars: list[CarRecord],
+    frames: list[dict],
+    usable_slot_ids: set[str],
+) -> dict:
     search_times = [
         car.park_start - car.search_start
         for car in cars
@@ -973,15 +1108,18 @@ def _build_metrics(slots: list[ParkingSlot], cars: list[CarRecord], frames: list
         ),
         default=0,
     )
-    car_slot_count = sum(1 for slot in slots if slot.slot_type == "car_slot")
-    motorcycle_slot_count = sum(1 for slot in slots if slot.slot_type == "motorcycle_slot")
+    car_slot_count = sum(1 for slot in slots if slot.slot_type == "car_slot" and slot.id in usable_slot_ids)
+    motorcycle_slot_count = sum(
+        1 for slot in slots if slot.slot_type == "motorcycle_slot" and slot.id in usable_slot_ids
+    )
     total_cars = sum(1 for car in cars if car.vehicle_type == "car")
     total_motorcycles = sum(1 for car in cars if car.vehicle_type == "motorcycle")
     return {
         "total_vehicle_count": len(cars),
         "total_cars": total_cars,
         "total_motorcycles": total_motorcycles,
-        "total_slots": len(slots),
+        "total_slots": len(usable_slot_ids),
+        "visible_slot_count": len(slots),
         "total_car_slots": car_slot_count,
         "total_motorcycle_slots": motorcycle_slot_count,
         "total_completed_cars": sum(
@@ -997,7 +1135,7 @@ def _build_metrics(slots: list[ParkingSlot], cars: list[CarRecord], frames: list
         "max_entry_queue_length": max((frame["current_entry_queue"] for frame in frames), default=0),
         "max_exit_queue_length": max((frame["current_exit_queue"] for frame in frames), default=0),
         "peak_occupied_slots": max_occupied,
-        "occupancy_rate_percent": round((max_occupied / max(len(slots), 1)) * 100, 1),
+        "occupancy_rate_percent": round((max_occupied / max(len(usable_slot_ids), 1)) * 100, 1),
         "car_slot_occupancy_percent": round((peak_car_slots / max(car_slot_count, 1)) * 100, 1),
         "motorcycle_slot_occupancy_percent": round(
             (peak_motorcycle_slots / max(motorcycle_slot_count, 1)) * 100,
