@@ -162,17 +162,16 @@ EXIT_QUEUE_LANE_X = 88.5
 # Staging lane in the left half of the exit road: joining vehicles descend here
 # and merge into the TAIL from the side, never driving through the cars in line.
 EXIT_QUEUE_APPROACH_X = 85.5
-# When the column would run off the bottom of the map it wraps left along the
-# lower perimeter road at this y (below Row C); overflow cars queue there.
-EXIT_QUEUE_WRAP_Y = 84.0
-# Lowest car of the vertical column before the queue wraps. Kept on the straight
-# exit road above the curve so the column doesn't spill onto the median.
-EXIT_QUEUE_COLUMN_BOTTOM_Y = 75.0
+# The column runs down the exit lane to the RIGHT of the hatched median island
+# (which sits in the inside of the bend, ~x79-87/y72-85), then wraps left along
+# the bottom road BELOW the median so no car ever sits on the median.
+EXIT_QUEUE_COLUMN_BOTTOM_Y = 83.0
+EXIT_QUEUE_WRAP_Y = 87.0
 # Horizontal staging lane (above the wrap road) for joining the wrapped tail.
-EXIT_QUEUE_APPROACH_Y = 80.0
-# Descent lane for the horizontal approach, kept left of the corner curve
-# (which spans x~82-88) so approaching cars don't clip cars on the bend.
-EXIT_QUEUE_WRAP_APPROACH_X = 80.0
+EXIT_QUEUE_APPROACH_Y = 85.0
+# Descent lane for the horizontal approach, kept left of the median so
+# approaching cars don't clip it or the cars on the bend.
+EXIT_QUEUE_WRAP_APPROACH_X = 77.0
 EXIT_THROAT_POINT = (EXIT_QUEUE_LANE_X, EXIT_GATE_ROAD_Y)
 EXIT_STOP_POINT = (EXIT_QUEUE_LANE_X, 41.0)
 EXIT_GATE_BASE_POINT = (EXIT_STOP_POINT[0], EXIT_GATE_ROAD_Y)
