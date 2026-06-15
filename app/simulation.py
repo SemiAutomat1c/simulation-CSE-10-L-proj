@@ -172,6 +172,13 @@ EXIT_QUEUE_APPROACH_Y = 85.0
 # Descent lane for the horizontal approach, kept left of the median so
 # approaching cars don't clip it or the cars on the bend.
 EXIT_QUEUE_WRAP_APPROACH_X = 77.0
+# A long wrap snakes into stacked rows instead of running into the entry queue:
+# each row stops at LEFT_X (clear of the entry lane) and drops to the next row,
+# alternating direction (boustrophedon).
+EXIT_QUEUE_WRAP_LEFT_X = 15.0
+EXIT_QUEUE_WRAP_RIGHT_X = 82.0
+EXIT_QUEUE_WRAP_ROW_GAP = 5.0
+EXIT_QUEUE_WRAP_ROWS = 3
 EXIT_THROAT_POINT = (EXIT_QUEUE_LANE_X, EXIT_GATE_ROAD_Y)
 EXIT_STOP_POINT = (EXIT_QUEUE_LANE_X, 41.0)
 EXIT_GATE_BASE_POINT = (EXIT_STOP_POINT[0], EXIT_GATE_ROAD_Y)
@@ -679,11 +686,12 @@ def _car_heading(car: CarRecord, cars: list[CarRecord], slots: list[ParkingSlot]
 
     if abs(dx) + abs(dy) < 1e-5:
         if state == "exit_queue":
-            # Wrapped/corner cars sit along the bottom road facing the corner
-            # (horizontal); the vertical column faces the gate (up).
+            # Vertical column faces the gate (up). Wrapped rows face the way they
+            # advance, which alternates per snake row (right, then left, ...).
             pos = _car_position(car, cars, slots, time_minutes, state)
             if pos[1] > EXIT_QUEUE_COLUMN_BOTTOM_Y + 0.5:
-                return 90.0
+                row = round((pos[1] - EXIT_QUEUE_WRAP_Y) / EXIT_QUEUE_WRAP_ROW_GAP)
+                return 90.0 if row % 2 == 0 else 270.0
             return 0.0
         return slot.angle if slot is not None else 90.0
 
@@ -919,32 +927,50 @@ def _exit_queue_position(
     )
 
 
+def _exit_queue_path_points() -> list[tuple[float, float]]:
+    """The polyline the exit queue follows: down the exit lane, around the corner,
+    then snaking left/right along stacked bottom rows.  Each row stops at LEFT_X so
+    it never runs into the entry queue, then drops to the next row below."""
+    points = [
+        (EXIT_QUEUE_LANE_X, EXIT_GATE_ROAD_Y),
+        (EXIT_QUEUE_LANE_X, EXIT_QUEUE_COLUMN_BOTTOM_Y),
+        (EXIT_QUEUE_LANE_X - EXIT_HORIZ_QUEUE_SPACING, EXIT_QUEUE_WRAP_Y),
+    ]
+    y = EXIT_QUEUE_WRAP_Y
+    going_left = True
+    for _ in range(EXIT_QUEUE_WRAP_ROWS):
+        end_x = EXIT_QUEUE_WRAP_LEFT_X if going_left else EXIT_QUEUE_WRAP_RIGHT_X
+        points.append((end_x, y))            # run to the end of this row
+        y += EXIT_QUEUE_WRAP_ROW_GAP
+        points.append((end_x, y))            # drop to the next row
+        going_left = not going_left
+    return points
+
+
+def _point_along_polyline(points: list[tuple[float, float]], distance: float) -> tuple[float, float]:
+    """Point at the given arc-length distance along a polyline.  Past the end it
+    keeps going in the last segment's direction (rare extreme overflow)."""
+    if distance <= 0:
+        return points[0]
+    for start, end in zip(points, points[1:]):
+        seg = _distance(start, end)
+        if seg <= 0:
+            continue
+        if distance <= seg:
+            t = distance / seg
+            return (start[0] + (end[0] - start[0]) * t, start[1] + (end[1] - start[1]) * t)
+        distance -= seg
+    start, end = points[-2], points[-1]
+    seg = _distance(start, end) or 1.0
+    ux, uy = (end[0] - start[0]) / seg, (end[1] - start[1]) / seg
+    return (end[0] + ux * distance, end[1] + uy * distance)
+
+
 def _exit_queue_slot_point(index: int) -> tuple[float, float]:
-    """Position of the Nth car in the exit queue, measured by arc length along the
-    queue path: straight down the exit road, around the corner, then left along the
-    bottom road.  Placing by arc length keeps consecutive slots one spacing apart
-    even around the bend, so an advancing car hugs the corner instead of jumping
-    diagonally across it."""
-    # Polyline the queue follows, head -> column bottom -> corner -> left.
-    head = (EXIT_QUEUE_LANE_X, EXIT_GATE_ROAD_Y)
-    column_bottom = (EXIT_QUEUE_LANE_X, EXIT_QUEUE_COLUMN_BOTTOM_Y)
-    corner = (EXIT_QUEUE_LANE_X - EXIT_HORIZ_QUEUE_SPACING, EXIT_QUEUE_WRAP_Y)
-
-    d = index * EXIT_VERT_QUEUE_SPACING
-    seg_vert = column_bottom[1] - head[1]
-    seg_corner = _distance(column_bottom, corner)
-
-    if d <= seg_vert:
-        return (head[0], head[1] + d)
-    d -= seg_vert
-    if d <= seg_corner:
-        t = d / seg_corner
-        return (
-            column_bottom[0] + (corner[0] - column_bottom[0]) * t,
-            column_bottom[1] + (corner[1] - column_bottom[1]) * t,
-        )
-    d -= seg_corner
-    return (corner[0] - d, corner[1])
+    """Position of the Nth car in the exit queue, by arc length along the queue
+    polyline.  Arc-length placement keeps consecutive slots one spacing apart even
+    around the bend and snake turns, so advancing cars hug the path."""
+    return _point_along_polyline(_exit_queue_path_points(), index * EXIT_VERT_QUEUE_SPACING)
 
 
 def _exit_queue_target_point(cars: list[CarRecord], current_car: CarRecord, reference_time: float) -> tuple[float, float]:
