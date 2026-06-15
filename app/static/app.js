@@ -219,6 +219,11 @@ function renderFrame(frame, nextFrame, subProgress) {
       exitGateArm.classList.remove("open");
     }
   }
+  // Custom-map animated gate arms (open with the same gate-state flags).
+  customGateNodes.forEach((node) => {
+    const open = node.dataset.gateType === "exit" ? frame.exit_gate_open : frame.entry_gate_open;
+    node.classList.toggle("open", Boolean(open));
+  });
 
   currentTime.textContent = prettyMinutes(frame.time_minutes);
   entryQueue.textContent = frame.current_entry_queue;
@@ -392,17 +397,60 @@ function tick(timestamp) {
 
 const DEFAULT_BACKGROUND = "/static/assets/generated/custom-parking-background.png";
 const SCENARIO_BACKGROUNDS = {
-  two_entrance_two_exit: "/static/assets/generated/map-two-entrance-two-exit.png?v=2",
-  two_entrance_one_exit: "/static/assets/generated/map-two-entrance-one-exit.png?v=2",
-  one_entrance_two_exit: "/static/assets/generated/map-one-entrance-two-exit.png?v=2",
+  two_entrance_two_exit: "/static/assets/generated/map-two-entrance-two-exit.png?v=3",
+  two_entrance_one_exit: "/static/assets/generated/map-two-entrance-one-exit.png?v=3",
+  one_entrance_two_exit: "/static/assets/generated/map-one-entrance-two-exit.png?v=3",
 };
 
 function applyScenarioBackground(scenario) {
   const custom = SCENARIO_BACKGROUNDS[scenario];
   const url = custom || DEFAULT_BACKGROUND;
   document.documentElement.style.setProperty("--map-background", `url("${url}")`);
-  // Custom maps draw their own gates/labels, so hide the overlay markers tuned to the base map.
+  // Custom maps draw their own labels, so hide the base-map overlay markers; the
+  // animated gate arms are rebuilt per-map below.
   document.body.classList.toggle("custom-map", Boolean(custom));
+  buildCustomGates(scenario);
+}
+
+// Animated gate arms per gate-layout map. Positions are % of the map surface
+// (top/left); arms rotate open via the .map-gate.open class, driven by the same
+// entry/exit gate-state flags as the default map.
+const SCENARIO_GATES = {
+  two_entrance_two_exit: [
+    { type: "entry", top: 19.5, left: 12.0 },
+    { type: "entry", top: 52.5, left: 12.0 },
+    { type: "exit", top: 25.5, left: 84.5 },
+    { type: "exit", top: 72.5, left: 84.5 },
+  ],
+  two_entrance_one_exit: [
+    { type: "entry", top: 19.5, left: 12.0 },
+    { type: "entry", top: 52.5, left: 12.0 },
+    { type: "exit", top: 42.0, left: 84.5 },
+  ],
+  one_entrance_two_exit: [
+    { type: "entry", top: 36.0, left: 12.0 },
+    { type: "exit", top: 25.5, left: 84.5 },
+    { type: "exit", top: 72.5, left: 84.5 },
+  ],
+};
+
+let customGateNodes = [];
+
+function buildCustomGates(scenario) {
+  const map = document.getElementById("parkingMap");
+  customGateNodes.forEach((n) => n.remove());
+  customGateNodes = [];
+  const gates = SCENARIO_GATES[scenario];
+  if (!map || !gates) return;
+  gates.forEach((g) => {
+    const arm = document.createElement("div");
+    arm.className = `map-gate map-gate-${g.type}`;
+    arm.dataset.gateType = g.type;
+    arm.style.top = `${g.top}%`;
+    arm.style.left = `${g.left}%`;
+    map.appendChild(arm);
+    customGateNodes.push(arm);
+  });
 }
 
 function customParamQuery() {

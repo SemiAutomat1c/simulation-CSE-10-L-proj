@@ -990,3 +990,35 @@ select:disabled,
 .custom-map .route-arrow {
   display: none !important;
 }
+
+/* ---- Animated gate arms for the gate-layout maps ---- */
+.map-gate {
+  position: absolute;
+  width: 6%;
+  height: 6px;
+  background: repeating-linear-gradient(
+    45deg,
+    #ffffff,
+    #ffffff 6px,
+    #ef5b54 6px,
+    #ef5b54 12px
+  );
+  border: 1px solid #1a1d1a;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  transition: transform 400ms cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 16;
+}
+
+.map-gate-entry {
+  transform-origin: 100% 50%;
+}
+.map-gate-entry.open {
+  transform: rotate(90deg);
+}
+
+.map-gate-exit {
+  transform-origin: 0% 50%;
+}
+.map-gate-exit.open {
+  transform: rotate(-90deg);
+}
