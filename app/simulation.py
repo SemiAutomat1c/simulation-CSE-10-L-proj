@@ -170,6 +170,9 @@ EXIT_QUEUE_WRAP_Y = 84.0
 EXIT_QUEUE_COLUMN_BOTTOM_Y = 75.0
 # Horizontal staging lane (above the wrap road) for joining the wrapped tail.
 EXIT_QUEUE_APPROACH_Y = 80.0
+# Descent lane for the horizontal approach, kept left of the corner curve
+# (which spans x~82-88) so approaching cars don't clip cars on the bend.
+EXIT_QUEUE_WRAP_APPROACH_X = 80.0
 EXIT_THROAT_POINT = (EXIT_QUEUE_LANE_X, EXIT_GATE_ROAD_Y)
 EXIT_STOP_POINT = (EXIT_QUEUE_LANE_X, 41.0)
 EXIT_GATE_BASE_POINT = (EXIT_STOP_POINT[0], EXIT_GATE_ROAD_Y)
@@ -546,6 +549,22 @@ def _apply_vehicle_spacing(car_payload: list[dict]) -> None:
         direction=1,
         minimum_gap=EXIT_HORIZ_QUEUE_SPACING,
     )
+    # Approach descent lanes: when several cars request exit at once they stack
+    # behind each other on the staging lane instead of overlapping.
+    _enforce_lane_spacing(
+        car_payload,
+        lambda car: car["state"] == "exit_queue" and abs(car["x"] - EXIT_QUEUE_APPROACH_X) <= 0.75 and MAIN_ROAD_Y - 1.0 <= car["y"] <= EXIT_QUEUE_COLUMN_BOTTOM_Y + 1.0,
+        axis="y",
+        direction=1,
+        minimum_gap=EXIT_VERT_QUEUE_SPACING,
+    )
+    _enforce_lane_spacing(
+        car_payload,
+        lambda car: car["state"] == "exit_queue" and abs(car["x"] - EXIT_QUEUE_WRAP_APPROACH_X) <= 0.75 and MAIN_ROAD_Y - 1.0 <= car["y"] <= EXIT_QUEUE_APPROACH_Y + 1.0,
+        axis="y",
+        direction=1,
+        minimum_gap=EXIT_VERT_QUEUE_SPACING,
+    )
     _enforce_lane_spacing(
         car_payload,
         lambda car: car["state"] == "exiting" and abs(car["x"] - EXIT_ROAD_UP_X) <= 0.35 and EXIT_ROAD_TOP_Y <= car["y"] <= EXIT_ROAD_UP_ENTRY_Y,
@@ -661,10 +680,10 @@ def _car_heading(car: CarRecord, cars: list[CarRecord], slots: list[ParkingSlot]
 
     if abs(dx) + abs(dy) < 1e-5:
         if state == "exit_queue":
-            # Wrapped cars sit along the bottom road facing the corner (horizontal);
-            # the vertical column faces the gate (up).
+            # Wrapped/corner cars sit along the bottom road facing the corner
+            # (horizontal); the vertical column faces the gate (up).
             pos = _car_position(car, cars, slots, time_minutes, state)
-            if pos[1] >= EXIT_QUEUE_WRAP_Y - 1.5 and pos[0] <= EXIT_QUEUE_LANE_X - 1.0:
+            if pos[1] > EXIT_QUEUE_COLUMN_BOTTOM_Y + 0.5:
                 return 90.0
             return 0.0
         return slot.angle if slot is not None else 90.0
@@ -901,19 +920,32 @@ def _exit_queue_position(
     )
 
 
-def _exit_queue_vertical_capacity() -> int:
-    """How many cars fit in the vertical column before the queue wraps."""
-    return int((EXIT_QUEUE_COLUMN_BOTTOM_Y - EXIT_GATE_ROAD_Y) // EXIT_VERT_QUEUE_SPACING) + 1
-
-
 def _exit_queue_slot_point(index: int) -> tuple[float, float]:
-    """Position of the Nth car in the exit queue: straight down the exit road,
-    then wrapping left along the bottom return road once the column is full."""
-    n_vert = _exit_queue_vertical_capacity()
-    if index < n_vert:
-        return (EXIT_QUEUE_LANE_X, EXIT_GATE_ROAD_Y + index * EXIT_VERT_QUEUE_SPACING)
-    h = index - n_vert + 1
-    return (EXIT_QUEUE_LANE_X - h * EXIT_HORIZ_QUEUE_SPACING, EXIT_QUEUE_WRAP_Y)
+    """Position of the Nth car in the exit queue, measured by arc length along the
+    queue path: straight down the exit road, around the corner, then left along the
+    bottom road.  Placing by arc length keeps consecutive slots one spacing apart
+    even around the bend, so an advancing car hugs the corner instead of jumping
+    diagonally across it."""
+    # Polyline the queue follows, head -> column bottom -> corner -> left.
+    head = (EXIT_QUEUE_LANE_X, EXIT_GATE_ROAD_Y)
+    column_bottom = (EXIT_QUEUE_LANE_X, EXIT_QUEUE_COLUMN_BOTTOM_Y)
+    corner = (EXIT_QUEUE_LANE_X - EXIT_HORIZ_QUEUE_SPACING, EXIT_QUEUE_WRAP_Y)
+
+    d = index * EXIT_VERT_QUEUE_SPACING
+    seg_vert = column_bottom[1] - head[1]
+    seg_corner = _distance(column_bottom, corner)
+
+    if d <= seg_vert:
+        return (head[0], head[1] + d)
+    d -= seg_vert
+    if d <= seg_corner:
+        t = d / seg_corner
+        return (
+            column_bottom[0] + (corner[0] - column_bottom[0]) * t,
+            column_bottom[1] + (corner[1] - column_bottom[1]) * t,
+        )
+    d -= seg_corner
+    return (corner[0] - d, corner[1])
 
 
 def _exit_queue_target_point(cars: list[CarRecord], current_car: CarRecord, reference_time: float) -> tuple[float, float]:
@@ -958,15 +990,15 @@ def _exit_queue_merge_path(queue_target: tuple[float, float]) -> list[tuple[floa
     the bottom road), run left to the tail column, then drop into the slot.
     """
     tx, ty = queue_target
-    if tx >= EXIT_QUEUE_LANE_X - 0.01:
+    if ty <= EXIT_QUEUE_COLUMN_BOTTOM_Y + 0.01:
         return [
             (EXIT_QUEUE_APPROACH_X, MAIN_ROAD_Y),
             (EXIT_QUEUE_APPROACH_X, ty),
             queue_target,
         ]
     return [
-        (EXIT_QUEUE_APPROACH_X, MAIN_ROAD_Y),
-        (EXIT_QUEUE_APPROACH_X, EXIT_QUEUE_APPROACH_Y),
+        (EXIT_QUEUE_WRAP_APPROACH_X, MAIN_ROAD_Y),
+        (EXIT_QUEUE_WRAP_APPROACH_X, EXIT_QUEUE_APPROACH_Y),
         (tx, EXIT_QUEUE_APPROACH_Y),
         queue_target,
     ]
