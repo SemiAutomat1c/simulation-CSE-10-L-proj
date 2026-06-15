@@ -83,10 +83,37 @@ async function fetchJson(url) {
   return response.json();
 }
 
+const CUSTOM_MAP_COORDINATE_TRANSFORM = {
+  xScale: 0.95815,
+  xOffset: 1.94316,
+  yScale: 1.03202,
+  yOffset: 2.42282,
+};
+
+function clampPercent(value) {
+  return Math.max(0, Math.min(100, value));
+}
+
+function usesCustomCoordinateGrid(x, y) {
+  if (!document.body.classList.contains("custom-map")) return false;
+  return x >= 24 && x <= 90 && y >= 12 && y <= 82;
+}
+
+function mapScenePoint(x, y) {
+  if (!usesCustomCoordinateGrid(x, y)) {
+    return { x, y };
+  }
+  const transform = CUSTOM_MAP_COORDINATE_TRANSFORM;
+  const transformedX = clampPercent(x * transform.xScale + transform.xOffset);
+  const transformedY = clampPercent(y * transform.yScale + transform.yOffset);
+  return { x: transformedX, y: transformedY };
+}
+
 function scenePoint(entity) {
+  const point = mapScenePoint(entity.x, entity.y);
   return {
-    left: `${entity.x}%`,
-    top: `${entity.y}%`,
+    left: `${point.x}%`,
+    top: `${point.y}%`,
   };
 }
 
@@ -97,8 +124,9 @@ function renderSlotLayer(slots) {
     const node = document.createElement("div");
     node.className = slotClass(slot);
     node.title = `${slot.id} ${slot.slot_type}`;
-    node.style.left = `${slot.x}%`;
-    node.style.top = `${slot.y}%`;
+    const slotPoint = mapScenePoint(slot.x, slot.y);
+    node.style.left = `${slotPoint.x}%`;
+    node.style.top = `${slotPoint.y}%`;
     node.style.setProperty("--slot-angle", `${slot.angle || 0}deg`);
     node.style.zIndex = `${100 + slot.row}`;
     slotLayer.appendChild(node);
@@ -246,14 +274,15 @@ function renderFrame(frame, nextFrame, subProgress) {
       }
     }
 
-    const point = { left: `${interpX}%`, top: `${interpY}%` };
+    const point = mapScenePoint(interpX, interpY);
+    const cssPoint = { left: `${point.x}%`, top: `${point.y}%` };
     node.className = carClass(car);
-    node.style.left = point.left;
-    node.style.top = point.top;
-    const angle = movementAngle(car, point, node);
+    node.style.left = cssPoint.left;
+    node.style.top = cssPoint.top;
+    const angle = movementAngle(car, cssPoint, node);
     node.style.transform = `translate(-50%, -50%) rotate(${angle}deg)`;
     node.style.opacity = car.state === "scheduled" || car.state === "done" ? "0" : "1";
-    node.style.zIndex = `${Math.round(interpY * 10)}`;
+    node.style.zIndex = `${Math.round(point.y * 10)}`;
     node.title = `${car.vehicle_type} ${car.id}: ${car.exit_phase ? `${car.state}/${car.exit_phase}` : car.state}`;
   });
 }
@@ -417,20 +446,20 @@ function applyScenarioBackground(scenario) {
 // entry/exit gate-state flags as the default map.
 const SCENARIO_GATES = {
   two_entrance_two_exit: [
-    { type: "entry", top: 19.5, left: 12.0 },
-    { type: "entry", top: 52.5, left: 12.0 },
-    { type: "exit", top: 25.5, left: 84.5 },
-    { type: "exit", top: 72.5, left: 84.5 },
+    { type: "entry", top: 23.6, left: 6.6, width: 7.6 },
+    { type: "entry", top: 64.2, left: 6.6, width: 7.6 },
+    { type: "exit", top: 34.2, left: 92.2, width: 8.8 },
+    { type: "exit", top: 69.3, left: 92.2, width: 8.8 },
   ],
   two_entrance_one_exit: [
-    { type: "entry", top: 19.5, left: 12.0 },
-    { type: "entry", top: 52.5, left: 12.0 },
-    { type: "exit", top: 42.0, left: 84.5 },
+    { type: "entry", top: 23.6, left: 6.6, width: 7.6 },
+    { type: "entry", top: 64.2, left: 6.6, width: 7.6 },
+    { type: "exit", top: 38.8, left: 92.2, width: 8.8 },
   ],
   one_entrance_two_exit: [
-    { type: "entry", top: 36.0, left: 12.0 },
-    { type: "exit", top: 25.5, left: 84.5 },
-    { type: "exit", top: 72.5, left: 84.5 },
+    { type: "entry", top: 24.7, left: 4.8, width: 7.4 },
+    { type: "exit", top: 34.2, left: 92.2, width: 8.8 },
+    { type: "exit", top: 69.3, left: 92.2, width: 8.8 },
   ],
 };
 
@@ -448,6 +477,7 @@ function buildCustomGates(scenario) {
     arm.dataset.gateType = g.type;
     arm.style.top = `${g.top}%`;
     arm.style.left = `${g.left}%`;
+    arm.style.width = `${g.width || 6}%`;
     map.appendChild(arm);
     customGateNodes.push(arm);
   });

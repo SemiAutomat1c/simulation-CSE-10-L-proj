@@ -803,6 +803,58 @@ class ParkingSimulationTests(unittest.TestCase):
             self.assertEqual(metrics["entry_gate_count"], entries, scenario)
             self.assertEqual(metrics["exit_gate_count"], exits, scenario)
 
+    def test_two_exit_map_splits_exit_queue_into_two_lanes(self) -> None:
+        payload = self.scenario_payload("two_entrance_two_exit")
+        lanes = {
+            car.get("exit_lane")
+            for frame in payload["frames"]
+            for car in frame["cars"]
+            if car["state"] == "exit_queue"
+        }
+        # Both exit lanes are used (not the single middle column).
+        self.assertIn("top", lanes)
+        self.assertIn("bottom", lanes)
+        self.assertNotIn("single", lanes)
+        # The two columns sit on opposite sides of the exit-road centre line.
+        # (Filter to cars settled in the column, not still approaching on the road.)
+        def column_xs(lane):
+            return {
+                round(car["x"], 1)
+                for frame in payload["frames"]
+                for car in frame["cars"]
+                if car["state"] == "exit_queue" and car.get("exit_lane") == lane and car["x"] >= 84.0
+            }
+        self.assertTrue(max(column_xs("top")) < min(column_xs("bottom")))
+
+    def test_two_entrance_map_cars_stop_at_their_gate_then_turn_into_loop(self) -> None:
+        payload = self.scenario_payload("two_entrance_two_exit")
+
+        def crossing(car_id):
+            return [
+                car
+                for frame in payload["frames"]
+                for car in frame["cars"]
+                if car["id"] == car_id and car["state"] == "gate_crossing"
+            ]
+
+        # Car 1 uses the top (north) gate, car 2 the lower (south) gate.
+        north = crossing(1)
+        south = crossing(2)
+        self.assertTrue(north)
+        self.assertTrue(south)
+
+        # North: crosses the top gate (y around 23) and turns right into the loop
+        # lane at x=25 without short-cutting diagonally across the lot.
+        self.assertTrue(any(abs(car["x"] - 8.0) <= 0.2 and 20.0 <= car["y"] <= 30.0 for car in north))
+        self.assertTrue(any(abs(car["x"] - 25.0) <= 0.6 and 33.0 <= car["y"] <= 37.0 for car in north))
+
+        # South (lower gate): the car stops at its OWN gate near y=64 and turns
+        # into the loop at the main-road level (~55.7) — it never drives up to the
+        # top-corner entry.
+        self.assertTrue(any(abs(car["x"] - 8.0) <= 0.2 and 60.0 <= car["y"] <= 70.0 for car in south))
+        self.assertTrue(any(abs(car["x"] - 25.0) <= 0.6 and 53.0 <= car["y"] <= 57.0 for car in south))
+        self.assertFalse(any(abs(car["x"] - 8.0) <= 0.2 and car["y"] < 40.0 for car in south))
+
     def test_adding_an_entry_gate_reduces_entry_wait(self) -> None:
         one = run_simulation(ParkingSimulationConfig(scenario="rush_hour", entry_gates=1)).metrics
         two = run_simulation(ParkingSimulationConfig(scenario="rush_hour", entry_gates=2)).metrics

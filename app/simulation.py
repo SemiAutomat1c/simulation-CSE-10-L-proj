@@ -53,6 +53,8 @@ class CarRecord:
     denied_time: float | None = None
     slot_id: str | None = None
     entrance: str = "south"  # "south" (default lane) or "north" (top lane, 2-entrance maps)
+    two_entrance: bool = False  # True on 2-entrance maps; the "south" lane then uses the lower gate
+    exit_lane: str = "single"  # "single" (default) or "top"/"bottom" (2-exit maps)
 
 
 class ParkingSimulationResult:
@@ -144,13 +146,13 @@ SCENARIO_PROFILES = {
     # into the profile so they affect the metrics; the animation keeps the shared lot.
     "two_entrance_two_exit": {
         "seed": 606,
-        "total_cars": 64,
+        "total_cars": 56,
         "slot_count": 72,
-        "arrival_mode": "clustered",
-        "early_window": (0, 4),
-        "cluster_window": (5, 18),
+        "arrival_mode": "spread",
+        "arrival_start": 0,
+        "arrival_end": 60,
         "entry_service": 1.0,
-        "exit_service": 1.6,
+        "exit_service": 1.2,
         "base_search": 1.7,
         "entry_gates": 2,
         "exit_gates": 2,
@@ -200,6 +202,12 @@ NORTH_ENTRY_SPAWN_Y = -14.0
 NORTH_ENTRY_STOP_LINE_Y = 18.0
 NORTH_ENTRY_GATE_Y = 23.0
 NORTH_ENTRY_HEAD_GAP = 4.0
+# South (lower) entrance on two-entrance maps. Cars rise from the bottom edge,
+# queue up to the lower gate (~64% down, aligned to the painted gate throat),
+# stop, pass straight through, then turn right into the central search loop.
+SOUTH_LOW_GATE_Y = 64.2
+SOUTH_LOW_STOP_LINE_Y = 70.0
+SOUTH_LOW_HEAD_GAP = 6.0
 ENTRY_LANE_MIN_GAP = 6.4
 DRIVING_LANE_MIN_GAP = 4.4
 MOTORCYCLE_LANE_MIN_GAP = 2.6
@@ -249,6 +257,14 @@ EXIT_ROAD_TOP_Y = -12.0
 EXIT_ROAD_BOTTOM_Y = 112.0
 EXIT_VERT_QUEUE_SPACING = 6.4
 EXIT_HORIZ_QUEUE_SPACING = 6.4
+# Two-exit maps: two parallel lanes either side of the road centre line, one
+# climbing to the top exit and one dropping to the bottom exit, instead of the
+# single middle column. The X offset keeps the columns from overlapping where
+# they both reach toward the central lot.
+EXIT_TOP_LANE_X = 86.8
+EXIT_BOTTOM_LANE_X = 90.2
+EXIT_TOP_STOP_Y = 28.0
+EXIT_BOTTOM_STOP_Y = 72.0
 
 
 def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
@@ -294,6 +310,11 @@ def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
     if base_profile.get("entry_gates", 1) >= 2:
         for index, car in enumerate(cars):
             car.entrance = "north" if index % 2 == 0 else "south"
+            car.two_entrance = True
+    # On maps with two exits, split departures between the top and bottom exit lanes.
+    if base_profile.get("exit_gates", 1) >= 2:
+        for index, car in enumerate(cars):
+            car.exit_lane = "top" if index % 2 == 0 else "bottom"
 
     env = simpy.Environment()
     entry_gate = simpy.Resource(env, capacity=entry_capacity)
@@ -622,9 +643,24 @@ def _apply_vehicle_spacing(car_payload: list[dict]) -> None:
     # Unified vertical exit queue on the exit road (above the wrap point).
     _enforce_lane_spacing(
         car_payload,
-        lambda car: car["state"] == "exit_queue" and abs(car["x"] - EXIT_QUEUE_LANE_X) <= 1.0 and car["y"] >= EXIT_GATE_ROAD_Y,
+        lambda car: car["state"] == "exit_queue" and car.get("exit_lane", "single") == "single" and abs(car["x"] - EXIT_QUEUE_LANE_X) <= 1.0 and car["y"] >= EXIT_GATE_ROAD_Y,
         axis="y",
         direction=-1,
+        minimum_gap=EXIT_VERT_QUEUE_SPACING,
+    )
+    # Two-exit maps: top column packs toward the top exit, bottom toward the bottom.
+    _enforce_lane_spacing(
+        car_payload,
+        lambda car: car["state"] == "exit_queue" and car.get("exit_lane") == "top" and abs(car["x"] - EXIT_TOP_LANE_X) <= 1.5,
+        axis="y",
+        direction=-1,
+        minimum_gap=EXIT_VERT_QUEUE_SPACING,
+    )
+    _enforce_lane_spacing(
+        car_payload,
+        lambda car: car["state"] == "exit_queue" and car.get("exit_lane") == "bottom" and abs(car["x"] - EXIT_BOTTOM_LANE_X) <= 1.5,
+        axis="y",
+        direction=1,
         minimum_gap=EXIT_VERT_QUEUE_SPACING,
     )
     # Wrapped exit queue running left along the bottom road (leader nearest corner).
@@ -715,6 +751,7 @@ def _car_to_frame(car: CarRecord, cars: list[CarRecord], slots: list[ParkingSlot
         "heading": _car_heading(car, cars, slots, state, time_minutes),
         "x": round(x, 2),
         "y": round(y, 2),
+        "exit_lane": car.exit_lane,
     }
 
 
@@ -895,6 +932,10 @@ def _entry_queue_target_point(cars: list[CarRecord], current_car: CarRecord, ref
         # North queue stacks upward toward the top spawn edge.
         lead_queue_y = NORTH_ENTRY_STOP_LINE_Y - NORTH_ENTRY_HEAD_GAP
         return (ENTRY_LANE_X, lead_queue_y - queue_idx * ENTRY_QUEUE_SPACING)
+    if _is_lower_entrance(current_car):
+        # Lower (south) gate: queue stacks downward toward the bottom spawn edge.
+        lead_queue_y = SOUTH_LOW_STOP_LINE_Y + SOUTH_LOW_HEAD_GAP
+        return (ENTRY_LANE_X, lead_queue_y + queue_idx * ENTRY_QUEUE_SPACING)
     head_gap = 6.0
     lead_queue_y = ENTRY_STOP_LINE_Y + head_gap
     return (ENTRY_LANE_X, lead_queue_y + queue_idx * ENTRY_QUEUE_SPACING)
@@ -923,11 +964,23 @@ def _search_start_point(slot: ParkingSlot | None) -> tuple[float, float]:
 
 def _gate_crossing_path(slot: ParkingSlot | None = None, car: CarRecord | None = None) -> list[tuple[float, float]]:
     if car is not None and car.entrance == "north":
-        # Cross the north gate and merge into the upper drive lane (Row A level).
+        # Cross the north gate, drop to the upper drive lane, then turn right into
+        # the central search loop (no diagonal short-cut across the lot).
         return [
             _entry_stop_point(car),
             (ENTRY_LANE_X, NORTH_ENTRY_GATE_Y),
             (ENTRY_LANE_X, ROW_A_DRIVE_Y),
+            (ENTRY_TURN_X, ROW_A_DRIVE_Y),
+            _search_start_point(slot),
+        ]
+    if car is not None and _is_lower_entrance(car):
+        # Cross the lower gate, rise to the main drive lane, then turn right into
+        # the central search loop.
+        return [
+            _entry_stop_point(car),
+            (ENTRY_LANE_X, SOUTH_LOW_GATE_Y),
+            (ENTRY_LANE_X, MAIN_ROAD_Y),
+            (ENTRY_TURN_X, MAIN_ROAD_Y),
             _search_start_point(slot),
         ]
     return [
@@ -939,9 +992,15 @@ def _gate_crossing_path(slot: ParkingSlot | None = None, car: CarRecord | None =
     ]
 
 
+def _is_lower_entrance(car: CarRecord | None) -> bool:
+    return car is not None and car.two_entrance and car.entrance == "south"
+
+
 def _entry_stop_point(car: CarRecord | None = None) -> tuple[float, float]:
     if car is not None and car.entrance == "north":
         return (ENTRY_LANE_X, NORTH_ENTRY_STOP_LINE_Y)
+    if _is_lower_entrance(car):
+        return (ENTRY_LANE_X, SOUTH_LOW_STOP_LINE_Y)
     return (ENTRY_LANE_X, ENTRY_STOP_LINE_Y)
 
 
@@ -1016,7 +1075,7 @@ def _exit_queue_position(
     # Denied and parked vehicles share one approach: a single collector along the
     # main road that merges into the exit column at one join point (no crossing).
     is_denied = car.denied_time is not None and car.slot_id is None
-    path = _slot_to_exit_queue_path(None if is_denied else slot, slot_point, queue_target)
+    path = _slot_to_exit_queue_path(None if is_denied else slot, slot_point, queue_target, car)
     return _interpolate_path(
         path,
         car.exit_request,
@@ -1064,10 +1123,24 @@ def _point_along_polyline(points: list[tuple[float, float]], distance: float) ->
     return (end[0] + ux * distance, end[1] + uy * distance)
 
 
-def _exit_queue_slot_point(index: int) -> tuple[float, float]:
+def _exit_stop_point(car: CarRecord | None = None) -> tuple[float, float]:
+    if car is not None and car.exit_lane == "top":
+        return (EXIT_TOP_LANE_X, EXIT_TOP_STOP_Y)
+    if car is not None and car.exit_lane == "bottom":
+        return (EXIT_BOTTOM_LANE_X, EXIT_BOTTOM_STOP_Y)
+    return EXIT_STOP_POINT
+
+
+def _exit_queue_slot_point(index: int, car: CarRecord | None = None) -> tuple[float, float]:
     """Position of the Nth car in the exit queue, by arc length along the queue
     polyline.  Arc-length placement keeps consecutive slots one spacing apart even
     around the bend and snake turns, so advancing cars hug the path."""
+    if car is not None and car.exit_lane == "top":
+        # Lane left of centre, climbing to the top exit; cars stack downward.
+        return (EXIT_TOP_LANE_X, EXIT_TOP_STOP_Y + index * EXIT_VERT_QUEUE_SPACING)
+    if car is not None and car.exit_lane == "bottom":
+        # Lane right of centre, dropping to the bottom exit; cars stack upward.
+        return (EXIT_BOTTOM_LANE_X, EXIT_BOTTOM_STOP_Y - index * EXIT_VERT_QUEUE_SPACING)
     return _point_along_polyline(_exit_queue_path_points(), index * EXIT_VERT_QUEUE_SPACING)
 
 
@@ -1079,6 +1152,7 @@ def _exit_queue_target_point(cars: list[CarRecord], current_car: CarRecord, refe
         for car in cars
         if car.exit_request is not None
         and car.exit_request <= reference_time
+        and car.exit_lane == current_car.exit_lane
         and (car.exit_start is None or car.exit_start > reference_time)
         and (car.done_time is None or car.done_time > reference_time)
     ]
@@ -1095,13 +1169,14 @@ def _exit_queue_target_point(cars: list[CarRecord], current_car: CarRecord, refe
     # approach one slot too far back.
     throat_busy = any(
         car.id != current_car.id
+        and car.exit_lane == current_car.exit_lane
         and car.exit_start is not None
         and car.exit_start <= reference_time
         and (car.exit_wait_start is None or car.exit_wait_start > reference_time)
         for car in cars
     )
     offset = 1 if throat_busy else 0
-    return _exit_queue_slot_point(queue_idx + offset)
+    return _exit_queue_slot_point(queue_idx + offset, current_car)
 
 
 def _exit_queue_merge_path(queue_target: tuple[float, float]) -> list[tuple[float, float]]:
@@ -1131,6 +1206,7 @@ def _slot_to_exit_queue_path(
     slot: ParkingSlot | None,
     slot_point: tuple[float, float],
     queue_target: tuple[float, float],
+    car: CarRecord | None = None,
 ) -> list[tuple[float, float]]:
     """Funnel every vehicle onto the main-road collector, then down a staging
     lane into the TAIL of the exit column.  All exiting vehicles share this single
@@ -1140,7 +1216,13 @@ def _slot_to_exit_queue_path(
     Right-edge connector lanes (x=85 from the top rows, x=77.5 from the bottom
     row) are reused to reach the main road; see _apply_vehicle_spacing.
     """
-    merge = _exit_queue_merge_path(queue_target)
+    # Two-exit maps: reach the exit lane on the main road, then go straight to the
+    # tail of the top/bottom column (no shared staging lane).
+    if car is not None and car.exit_lane in ("top", "bottom"):
+        lane_x = EXIT_TOP_LANE_X if car.exit_lane == "top" else EXIT_BOTTOM_LANE_X
+        merge = [(lane_x, MAIN_ROAD_Y), queue_target]
+    else:
+        merge = _exit_queue_merge_path(queue_target)
     # Denied vehicles are already coasting along the main road toward the column.
     if slot is None:
         return merge
@@ -1157,10 +1239,16 @@ def _slot_to_exit_queue_path(
 
 def _exit_approach_path(car: CarRecord, cars: list[CarRecord]) -> list[tuple[float, float]]:
     queue_start = _exit_queue_target_point(cars, car, car.exit_start or 0)
+    if car.exit_lane in ("top", "bottom"):
+        return [queue_start, _exit_stop_point(car)]
     return [queue_start, EXIT_GATE_BASE_POINT, EXIT_STOP_POINT]
 
 
 def _exit_merge_path(car: CarRecord) -> list[tuple[float, float]]:
+    if car.exit_lane in ("top", "bottom"):
+        stop = _exit_stop_point(car)
+        road_x = EXIT_ROAD_UP_X if car.exit_lane == "top" else EXIT_ROAD_DOWN_X
+        return [stop, (road_x, stop[1])]
     direction = _exit_direction(car)
     if direction == "up":
         return [
@@ -1175,6 +1263,12 @@ def _exit_merge_path(car: CarRecord) -> list[tuple[float, float]]:
 
 
 def _outside_road_path(car: CarRecord) -> list[tuple[float, float]]:
+    if car.exit_lane == "top":
+        sy = _exit_stop_point(car)[1]
+        return [(EXIT_ROAD_UP_X, sy), (EXIT_ROAD_UP_X, 14.0), (EXIT_ROAD_UP_X, EXIT_ROAD_TOP_Y)]
+    if car.exit_lane == "bottom":
+        sy = _exit_stop_point(car)[1]
+        return [(EXIT_ROAD_DOWN_X, sy), (EXIT_ROAD_DOWN_X, 90.0), (EXIT_ROAD_DOWN_X, EXIT_ROAD_BOTTOM_Y)]
     direction = _exit_direction(car)
     if direction == "up":
         return [
@@ -1190,6 +1284,10 @@ def _outside_road_path(car: CarRecord) -> list[tuple[float, float]]:
 
 
 def _exit_direction(car: CarRecord) -> str:
+    if car.exit_lane == "top":
+        return "up"
+    if car.exit_lane == "bottom":
+        return "down"
     return "up" if car.id % 2 else "down"
 
 
@@ -1221,7 +1319,7 @@ def _exit_position(
             time_minutes,
         )
     if phase == "wait":
-        return EXIT_STOP_POINT
+        return _exit_stop_point(car)
     if phase == "merge":
         return _interpolate_path(
             _exit_merge_path(car),
