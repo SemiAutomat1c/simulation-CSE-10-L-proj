@@ -748,6 +748,43 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertTrue(wait_positions)
         self.assertEqual(wait_positions, {(8.0, 36.0)})
 
+    def test_performance_metrics_are_present_and_sane(self) -> None:
+        metrics = self.scenario_payload("baseline")["metrics"]
+        for key in (
+            "average_entry_wait_minutes",
+            "average_exit_wait_minutes",
+            "average_wait_minutes",
+            "average_entry_service_minutes",
+            "average_exit_service_minutes",
+            "average_time_in_system_minutes",
+            "throughput_vehicles_per_hour",
+            "entry_gate_utilization_percent",
+            "exit_gate_utilization_percent",
+            "average_entry_queue_length",
+            "average_exit_queue_length",
+        ):
+            self.assertIn(key, metrics)
+            self.assertGreaterEqual(metrics[key], 0)
+        # Utilisation of a single-capacity resource cannot exceed 100%.
+        self.assertLessEqual(metrics["entry_gate_utilization_percent"], 100)
+        self.assertLessEqual(metrics["exit_gate_utilization_percent"], 100)
+        self.assertGreater(metrics["throughput_vehicles_per_hour"], 0)
+
+    def test_slow_entry_raises_entry_wait_and_utilisation(self) -> None:
+        baseline = self.scenario_payload("baseline")["metrics"]
+        slow = self.scenario_payload("slow_entry")["metrics"]
+
+        self.assertGreater(slow["average_entry_wait_minutes"], baseline["average_entry_wait_minutes"])
+        self.assertGreater(slow["entry_gate_utilization_percent"], baseline["entry_gate_utilization_percent"])
+        self.assertGreater(slow["average_entry_service_minutes"], baseline["average_entry_service_minutes"])
+
+    def test_exit_congestion_raises_exit_wait_and_utilisation(self) -> None:
+        baseline = self.scenario_payload("baseline")["metrics"]
+        congested = self.scenario_payload("exit_congestion")["metrics"]
+
+        self.assertGreater(congested["average_exit_wait_minutes"], baseline["average_exit_wait_minutes"])
+        self.assertGreater(congested["exit_gate_utilization_percent"], baseline["exit_gate_utilization_percent"])
+
 
 if __name__ == "__main__":
     unittest.main()

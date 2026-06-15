@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mall Parking Flow Simulation</title>
-    <link rel="stylesheet" href="/static/style.css?v=19" />
+    <link rel="stylesheet" href="/static/style.css?v=21" />
   </head>
   <body>
     <div class="app-shell">
@@ -24,6 +24,9 @@
           <div class="button-row">
             <button id="playPauseButton" class="pixel-button" type="button">Pause</button>
             <button id="replayButton" class="pixel-button secondary" type="button">Replay</button>
+          </div>
+          <div class="button-row">
+            <button id="compareButton" class="pixel-button secondary" type="button">Compare scenarios</button>
           </div>
           <label class="field" style="margin-top: 8px;">
             <span>Speed: <strong id="speedValue">1.00x</strong></span>
@@ -50,6 +53,20 @@
           <div><span>Denied</span><strong id="metricDenied">0</strong></div>
           <div><span>Peak Occupancy</span><strong id="metricOccupancy">0%</strong></div>
           <div><span>Exit Complete</span><strong id="metricExitComplete">0 min</strong></div>
+        </section>
+
+        <section class="panel summary">
+          <h2>Performance</h2>
+          <div><span>Avg Entry Wait</span><strong id="metricEntryWait">0 min</strong></div>
+          <div><span>Avg Exit Wait</span><strong id="metricExitWait">0 min</strong></div>
+          <div><span>Avg Time In System</span><strong id="metricTimeInSystem">0 min</strong></div>
+          <div><span>Entry Service</span><strong id="metricEntryService">0 min</strong></div>
+          <div><span>Exit Service</span><strong id="metricExitService">0 min</strong></div>
+          <div><span>Throughput</span><strong id="metricThroughput">0/hr</strong></div>
+          <div><span>Entry Gate Util</span><strong id="metricEntryUtil">0%</strong></div>
+          <div><span>Exit Gate Util</span><strong id="metricExitUtil">0%</strong></div>
+          <div><span>Avg Entry Queue</span><strong id="metricAvgEntryQueue">0</strong></div>
+          <div><span>Avg Exit Queue</span><strong id="metricAvgExitQueue">0</strong></div>
         </section>
 
         <section class="panel summary">
@@ -101,9 +118,16 @@
           <span><i class="swatch exiting"></i> Exiting</span>
           <span><i class="swatch denied"></i> Full / Denied</span>
         </div>
+
+        <section id="comparePanel" class="compare-panel" hidden aria-label="scenario comparison">
+          <h2>Scenario Comparison</h2>
+          <p class="compare-note">Every scenario is run with the same model; only arrival timing, capacity, and gate service times change. Lower waits/queues and higher throughput are better.</p>
+          <div id="compareTableWrap" class="compare-table-wrap"></div>
+          <div id="compareCharts" class="compare-charts"></div>
+        </section>
       </main>
     </div>
 
-    <script src="/static/app.js?v=16" type="module"></script>
+    <script src="/static/app.js?v=17" type="module"></script>
   </body>
 </html>

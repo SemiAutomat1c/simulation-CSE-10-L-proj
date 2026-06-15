@@ -27,8 +27,23 @@ const metricOccupancy = document.getElementById("metricOccupancy");
 const metricCarSlotPeak = document.getElementById("metricCarSlotPeak");
 const metricMotoSlotPeak = document.getElementById("metricMotoSlotPeak");
 const metricExitComplete = document.getElementById("metricExitComplete");
+const metricEntryWait = document.getElementById("metricEntryWait");
+const metricExitWait = document.getElementById("metricExitWait");
+const metricTimeInSystem = document.getElementById("metricTimeInSystem");
+const metricEntryService = document.getElementById("metricEntryService");
+const metricExitService = document.getElementById("metricExitService");
+const metricThroughput = document.getElementById("metricThroughput");
+const metricEntryUtil = document.getElementById("metricEntryUtil");
+const metricExitUtil = document.getElementById("metricExitUtil");
+const metricAvgEntryQueue = document.getElementById("metricAvgEntryQueue");
+const metricAvgExitQueue = document.getElementById("metricAvgExitQueue");
+const compareButton = document.getElementById("compareButton");
+const comparePanel = document.getElementById("comparePanel");
+const compareTableWrap = document.getElementById("compareTableWrap");
+const compareCharts = document.getElementById("compareCharts");
 
 let simulationData = null;
+let compareData = null;
 let frameIndex = 0;
 let lastTick = 0;
 let playing = true;
@@ -251,6 +266,99 @@ function updateSummary(metrics) {
   metricCarSlotPeak.textContent = `${metrics.car_slot_occupancy_percent}%`;
   metricMotoSlotPeak.textContent = `${metrics.motorcycle_slot_occupancy_percent}%`;
   metricExitComplete.textContent = prettyMinutes(metrics.exit_completion_time_minutes);
+  metricEntryWait.textContent = prettyMinutes(metrics.average_entry_wait_minutes);
+  metricExitWait.textContent = prettyMinutes(metrics.average_exit_wait_minutes);
+  metricTimeInSystem.textContent = prettyMinutes(metrics.average_time_in_system_minutes);
+  metricEntryService.textContent = prettyMinutes(metrics.average_entry_service_minutes);
+  metricExitService.textContent = prettyMinutes(metrics.average_exit_service_minutes);
+  metricThroughput.textContent = `${Number(metrics.throughput_vehicles_per_hour).toFixed(1)}/hr`;
+  metricEntryUtil.textContent = `${metrics.entry_gate_utilization_percent}%`;
+  metricExitUtil.textContent = `${metrics.exit_gate_utilization_percent}%`;
+  metricAvgEntryQueue.textContent = Number(metrics.average_entry_queue_length).toFixed(1);
+  metricAvgExitQueue.textContent = Number(metrics.average_exit_queue_length).toFixed(1);
+}
+
+// ---- Scenario comparison view ----
+const COMPARE_COLUMNS = [
+  { key: "average_entry_wait_minutes", label: "Entry wait", unit: "min", better: "low" },
+  { key: "average_exit_wait_minutes", label: "Exit wait", unit: "min", better: "low" },
+  { key: "average_time_in_system_minutes", label: "Time in system", unit: "min", better: "low" },
+  { key: "throughput_vehicles_per_hour", label: "Throughput", unit: "/hr", better: "high" },
+  { key: "entry_gate_utilization_percent", label: "Entry gate util", unit: "%", better: "high" },
+  { key: "exit_gate_utilization_percent", label: "Exit gate util", unit: "%", better: "high" },
+  { key: "max_entry_queue_length", label: "Max entry queue", unit: "", better: "low" },
+  { key: "max_exit_queue_length", label: "Max exit queue", unit: "", better: "low" },
+  { key: "denied_vehicle_count", label: "Denied", unit: "", better: "low" },
+];
+
+const COMPARE_CHARTS = [
+  { key: "average_entry_wait_minutes", label: "Average entry wait (min)" },
+  { key: "average_exit_wait_minutes", label: "Average exit wait (min)" },
+  { key: "throughput_vehicles_per_hour", label: "Throughput (vehicles/hr)" },
+  { key: "entry_gate_utilization_percent", label: "Entry gate utilization (%)" },
+  { key: "exit_gate_utilization_percent", label: "Exit gate utilization (%)" },
+];
+
+function renderCompare(payload) {
+  const names = Object.keys(payload.scenarios);
+  // Table
+  const header =
+    `<tr><th>Metric</th>${names.map((n) => `<th>${scenarioLabel(n)}</th>`).join("")}</tr>`;
+  const rows = COMPARE_COLUMNS.map((col) => {
+    const vals = names.map((n) => payload.scenarios[n].metrics[col.key]);
+    const best = col.better === "low" ? Math.min(...vals) : Math.max(...vals);
+    const cells = names
+      .map((n, i) => {
+        const v = vals[i];
+        const isBest = v === best;
+        const shown = col.unit === "/hr" || col.unit === "min" ? Number(v).toFixed(1) : v;
+        return `<td class="${isBest ? "best" : ""}">${shown}${col.unit}</td>`;
+      })
+      .join("");
+    return `<tr><th>${col.label}</th>${cells}</tr>`;
+  }).join("");
+  compareTableWrap.innerHTML = `<table class="compare-table">${header}${rows}</table>`;
+
+  // Bar charts (dependency-free)
+  compareCharts.innerHTML = COMPARE_CHARTS.map((chart) => {
+    const entries = names.map((n) => ({ n, v: Number(payload.scenarios[n].metrics[chart.key]) }));
+    const max = Math.max(...entries.map((e) => e.v), 1);
+    const bars = entries
+      .map(
+        (e) =>
+          `<div class="bar-row"><span class="bar-label">${scenarioLabel(e.n)}</span>` +
+          `<span class="bar-track"><span class="bar-fill" style="width:${(e.v / max) * 100}%"></span></span>` +
+          `<span class="bar-value">${e.v.toFixed(1)}</span></div>`
+      )
+      .join("");
+    return `<div class="chart"><h3>${chart.label}</h3>${bars}</div>`;
+  }).join("");
+}
+
+async function ensureCompareData() {
+  if (compareData) return compareData;
+  compareData = await fetchJson(`/api/compare?t=${Date.now()}`);
+  return compareData;
+}
+
+async function toggleCompare() {
+  const showing = !comparePanel.hidden;
+  if (showing) {
+    comparePanel.hidden = true;
+    compareButton.textContent = "Compare scenarios";
+    return;
+  }
+  compareButton.textContent = "Loading...";
+  try {
+    const payload = await ensureCompareData();
+    renderCompare(payload);
+    comparePanel.hidden = false;
+    comparePanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    compareButton.textContent = "Hide comparison";
+  } catch (error) {
+    console.error("Failed to load comparison", error);
+    compareButton.textContent = "Compare scenarios";
+  }
 }
 
 function resetPlayback() {
@@ -341,6 +449,10 @@ replayButton.addEventListener("click", () => {
   playPauseButton.textContent = "Pause";
   resetPlayback();
 });
+
+if (compareButton) {
+  compareButton.addEventListener("click", toggleCompare);
+}
 
 if (speedSlider && speedValue) {
   speedSlider.addEventListener("input", (event) => {

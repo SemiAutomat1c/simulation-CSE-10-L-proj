@@ -93,6 +93,13 @@ Unknown scenario names fall back to `baseline`.
 - `car_slot_occupancy_percent`: Peak car-slot usage.
 - `motorcycle_slot_occupancy_percent`: Peak motorcycle-slot usage.
 - `exit_completion_time_minutes`: Last vehicle completion time.
+- `average_entry_wait_minutes` / `average_exit_wait_minutes`: Average time a vehicle spends queued before the entry / exit gate begins serving it.
+- `average_wait_minutes`: Average gate waiting time across both gates.
+- `average_entry_service_minutes` / `average_exit_service_minutes`: Average processing (service) time at each gate.
+- `average_time_in_system_minutes`: Average total time from arrival to departure (cycle time).
+- `throughput_vehicles_per_hour`: Completed vehicles divided by the run length, in vehicles per hour.
+- `entry_gate_utilization_percent` / `exit_gate_utilization_percent`: Fraction of the run each (capacity-1) gate was busy serving a vehicle.
+- `average_entry_queue_length` / `average_exit_queue_length`: Time-averaged queue length at each gate.
 
 ## API Endpoints
 
@@ -108,6 +115,12 @@ GET /api/simulation?scenario=baseline
 
 Returns the selected scenario, initial slots, generated timeline frames, and summary metrics. The JSON shape is intentionally stable for the frontend and tests.
 
+```text
+GET /api/compare
+```
+
+Returns metrics-only results for every scenario (no frames) for side-by-side comparison. Results are deterministic and cached after the first build. The dashboard's "Compare scenarios" button renders this as a table plus bar charts.
+
 ## Demo Walkthrough
 
 1. Start the local server and open the dashboard.
@@ -118,9 +131,17 @@ Returns the selected scenario, initial slots, generated timeline frames, and sum
 6. Use the speed slider and replay button to revisit interesting moments.
 7. Run `python3 -m unittest` to show the behavior is covered by automated tests.
 
+## Documentation (CSE 10/L deliverables)
+
+- `docs/REPORT.md`: Final report draft covering requirement items 1–5, 7, 8 (add a front cover, then export to PDF).
+- `docs/flowchart.md`: Vehicle-lifecycle process diagram (Mermaid).
+- `docs/architecture.md`: Conceptual DES model and software architecture diagrams (Mermaid).
+- `docs/SLIDES_OUTLINE.md`: Slide-by-slide outline mapped to the required presentation sections.
+
 ## Limitations
 
 - This is a local MVP, not a deployed production app.
-- There is no scenario editor, export flow, charting layer, authentication, or database.
+- One replication per scenario (deterministic seed); no confidence intervals.
+- There is no in-UI scenario editor, CSV export, authentication, or database.
 - The model prioritizes readable class-review behavior over real-world traffic physics.
 - The frontend is a static dashboard backed by the local FastAPI API.

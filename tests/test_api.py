@@ -35,6 +35,23 @@ class ParkingApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["scenario"], "baseline")
 
+    def test_compare_endpoint_returns_metrics_for_all_scenarios(self) -> None:
+        response = self.client.get("/api/compare")
+        payload = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(set(payload["scenarios"].keys()), set(SCENARIOS.keys()))
+        baseline = payload["scenarios"]["baseline"]["metrics"]
+        for key in (
+            "average_entry_wait_minutes",
+            "average_exit_wait_minutes",
+            "throughput_vehicles_per_hour",
+            "entry_gate_utilization_percent",
+        ):
+            self.assertIn(key, baseline)
+        # Metrics-only payload keeps the comparison response lightweight.
+        self.assertNotIn("frames", payload["scenarios"]["baseline"])
+
 
 if __name__ == "__main__":
     unittest.main()

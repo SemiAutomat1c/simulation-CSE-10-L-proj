@@ -1259,6 +1259,62 @@ def _build_metrics(
     )
     total_cars = sum(1 for car in cars if car.vehicle_type == "car")
     total_motorcycles = sum(1 for car in cars if car.vehicle_type == "motorcycle")
+
+    # --- Discrete-event performance metrics (derived from per-vehicle timestamps) ---
+    def _avg(values: list[float]) -> float:
+        return round(sum(values) / len(values), 2) if values else 0.0
+
+    # Waiting time = time spent in a queue before the gate begins serving the vehicle.
+    entry_waits = [
+        car.approach_start - car.entry_queue_time
+        for car in cars
+        if car.approach_start is not None and car.entry_queue_time is not None
+    ]
+    exit_waits = [
+        car.exit_start - car.exit_request
+        for car in cars
+        if car.exit_start is not None and car.exit_request is not None
+    ]
+    # Processing (service) time = time the gate actively serves the vehicle.
+    entry_services = [
+        car.gate_cross_start - car.gate_wait_start
+        for car in cars
+        if car.gate_cross_start is not None and car.gate_wait_start is not None
+    ]
+    exit_services = [
+        car.exit_merge_start - car.exit_wait_start
+        for car in cars
+        if car.exit_merge_start is not None and car.exit_wait_start is not None
+    ]
+    # Cycle time = total time in the system, arrival to departure.
+    time_in_system = [
+        car.done_time - car.arrival_time
+        for car in cars
+        if car.done_time is not None
+    ]
+
+    completed_vehicles = sum(1 for car in cars if car.done_time is not None and car.slot_id is not None)
+    end_minute = max((frame["time_minutes"] for frame in frames), default=0.0) or 0.0
+    throughput_per_hour = round(completed_vehicles / (end_minute / 60.0), 2) if end_minute > 0 else 0.0
+
+    # Resource utilisation = fraction of the run each gate (capacity 1) was held busy.
+    entry_busy = sum(
+        (car.search_start if car.search_start is not None else car.denied_time) - car.approach_start
+        for car in cars
+        if car.approach_start is not None
+        and (car.search_start is not None or car.denied_time is not None)
+    )
+    exit_busy = sum(
+        car.exit_road_start - car.exit_start
+        for car in cars
+        if car.exit_road_start is not None and car.exit_start is not None
+    )
+    entry_gate_util = round(min(entry_busy / end_minute, 1.0) * 100, 1) if end_minute > 0 else 0.0
+    exit_gate_util = round(min(exit_busy / end_minute, 1.0) * 100, 1) if end_minute > 0 else 0.0
+
+    avg_entry_queue = round(sum(f["current_entry_queue"] for f in frames) / len(frames), 2) if frames else 0.0
+    avg_exit_queue = round(sum(f["current_exit_queue"] for f in frames) / len(frames), 2) if frames else 0.0
+
     return {
         "total_vehicle_count": len(cars),
         "total_cars": total_cars,
@@ -1287,4 +1343,16 @@ def _build_metrics(
             1,
         ),
         "exit_completion_time_minutes": round(max((car.done_time or 0 for car in cars), default=0), 1),
+        # Discrete-event performance metrics (rubric item 7).
+        "average_entry_wait_minutes": _avg(entry_waits),
+        "average_exit_wait_minutes": _avg(exit_waits),
+        "average_wait_minutes": _avg(entry_waits + exit_waits),
+        "average_entry_service_minutes": _avg(entry_services),
+        "average_exit_service_minutes": _avg(exit_services),
+        "average_time_in_system_minutes": _avg(time_in_system),
+        "throughput_vehicles_per_hour": throughput_per_hour,
+        "entry_gate_utilization_percent": entry_gate_util,
+        "exit_gate_utilization_percent": exit_gate_util,
+        "average_entry_queue_length": avg_entry_queue,
+        "average_exit_queue_length": avg_exit_queue,
     }

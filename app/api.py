@@ -41,4 +41,23 @@ def create_app() -> FastAPI:
         result = run_simulation(ParkingSimulationConfig(scenario=scenario))
         return result.to_dict()
 
+    @app.get("/api/compare")
+    def compare() -> dict:
+        """Metrics-only run of every scenario for side-by-side analysis.
+        Output is deterministic, so results are cached after the first build."""
+        scenarios = {}
+        for name in SCENARIOS:
+            if name not in _metrics_cache:
+                _metrics_cache[name] = run_simulation(
+                    ParkingSimulationConfig(scenario=name)
+                ).metrics
+            scenarios[name] = {
+                "description": SCENARIOS[name],
+                "metrics": _metrics_cache[name],
+            }
+        return {"scenarios": scenarios}
+
     return app
+
+
+_metrics_cache: dict[str, dict] = {}
