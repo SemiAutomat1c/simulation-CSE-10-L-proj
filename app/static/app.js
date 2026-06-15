@@ -392,9 +392,9 @@ function tick(timestamp) {
 
 const DEFAULT_BACKGROUND = "/static/assets/generated/custom-parking-background.png";
 const SCENARIO_BACKGROUNDS = {
-  two_entrance_two_exit: "/static/assets/generated/map-two-entrance-two-exit.png",
-  two_entrance_one_exit: "/static/assets/generated/map-two-entrance-one-exit.png",
-  one_entrance_two_exit: "/static/assets/generated/map-one-entrance-two-exit.png",
+  two_entrance_two_exit: "/static/assets/generated/map-two-entrance-two-exit.png?v=2",
+  two_entrance_one_exit: "/static/assets/generated/map-two-entrance-one-exit.png?v=2",
+  one_entrance_two_exit: "/static/assets/generated/map-one-entrance-two-exit.png?v=2",
 };
 
 function applyScenarioBackground(scenario) {
