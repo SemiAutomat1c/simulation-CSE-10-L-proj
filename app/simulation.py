@@ -199,14 +199,14 @@ MAIN_ROAD_Y = 55.7
 # North (top) entrance, used only on two-entrance maps. Cars appear from the top
 # edge, queue downward to the north gate, then merge into the upper drive lane.
 NORTH_ENTRY_SPAWN_Y = -14.0
-NORTH_ENTRY_STOP_LINE_Y = 18.0
-NORTH_ENTRY_GATE_Y = 23.0
+NORTH_ENTRY_STOP_LINE_Y = 24.0
+NORTH_ENTRY_GATE_Y = 29.0
 NORTH_ENTRY_HEAD_GAP = 4.0
 # South (lower) entrance on two-entrance maps. Cars rise from the bottom edge,
-# queue up to the lower gate (~64% down, aligned to the painted gate throat),
+# queue up to the lower gate (~72% down, aligned to the painted booth throat),
 # stop, pass straight through, then turn right into the central search loop.
-SOUTH_LOW_GATE_Y = 64.2
-SOUTH_LOW_STOP_LINE_Y = 70.0
+SOUTH_LOW_GATE_Y = 72.0
+SOUTH_LOW_STOP_LINE_Y = 78.0
 SOUTH_LOW_HEAD_GAP = 6.0
 ENTRY_LANE_MIN_GAP = 6.4
 DRIVING_LANE_MIN_GAP = 4.4
@@ -257,14 +257,15 @@ EXIT_ROAD_TOP_Y = -12.0
 EXIT_ROAD_BOTTOM_Y = 112.0
 EXIT_VERT_QUEUE_SPACING = 6.4
 EXIT_HORIZ_QUEUE_SPACING = 6.4
-# Two-exit maps: two parallel lanes either side of the road centre line, one
-# climbing to the top exit and one dropping to the bottom exit, instead of the
-# single middle column. The X offset keeps the columns from overlapping where
-# they both reach toward the central lot.
-EXIT_TOP_LANE_X = 86.8
-EXIT_BOTTOM_LANE_X = 90.2
-EXIT_TOP_STOP_Y = 28.0
-EXIT_BOTTOM_STOP_Y = 72.0
+# Two-exit maps: each gate is fed by a HORIZONTAL queue at the gate's own level.
+# The front car sits just left of the gate throat; the rest stack back (leftward)
+# along that lane into the lot, so the top exit and bottom exit read as two
+# clearly separate lanes instead of overlapping vertical columns on the right.
+EXIT_TOP_GATE_POINT = (87.0, 31.0)      # aligned to the top exit gate throat
+EXIT_BOTTOM_GATE_POINT = (87.0, 65.0)   # aligned to the bottom exit gate throat
+# Where a joining car drops onto the queue lane from the main road before backing
+# into the tail (kept inside the lot so it never crosses the line head-on).
+EXIT_TWO_LANE_MIN_X = 26.0
 
 
 def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
@@ -648,20 +649,21 @@ def _apply_vehicle_spacing(car_payload: list[dict]) -> None:
         direction=-1,
         minimum_gap=EXIT_VERT_QUEUE_SPACING,
     )
-    # Two-exit maps: top column packs toward the top exit, bottom toward the bottom.
+    # Two-exit maps: each gate has a horizontal queue at its own level; the front
+    # car sits at the gate (highest x) and the rest stack back leftward.
     _enforce_lane_spacing(
         car_payload,
-        lambda car: car["state"] == "exit_queue" and car.get("exit_lane") == "top" and abs(car["x"] - EXIT_TOP_LANE_X) <= 1.5,
-        axis="y",
-        direction=-1,
-        minimum_gap=EXIT_VERT_QUEUE_SPACING,
+        lambda car: car["state"] == "exit_queue" and car.get("exit_lane") == "top" and abs(car["y"] - EXIT_TOP_GATE_POINT[1]) <= 1.5,
+        axis="x",
+        direction=1,
+        minimum_gap=EXIT_HORIZ_QUEUE_SPACING,
     )
     _enforce_lane_spacing(
         car_payload,
-        lambda car: car["state"] == "exit_queue" and car.get("exit_lane") == "bottom" and abs(car["x"] - EXIT_BOTTOM_LANE_X) <= 1.5,
-        axis="y",
+        lambda car: car["state"] == "exit_queue" and car.get("exit_lane") == "bottom" and abs(car["y"] - EXIT_BOTTOM_GATE_POINT[1]) <= 1.5,
+        axis="x",
         direction=1,
-        minimum_gap=EXIT_VERT_QUEUE_SPACING,
+        minimum_gap=EXIT_HORIZ_QUEUE_SPACING,
     )
     # Wrapped exit queue running left along the bottom road (leader nearest corner).
     _enforce_lane_spacing(
@@ -761,7 +763,9 @@ def _car_heading(car: CarRecord, cars: list[CarRecord], slots: list[ParkingSlot]
         return slot.angle
 
     if state in {"entry_queue", "gate_wait"}:
-        return 0.0
+        # Bottom entrances queue upward (face up, 0deg); the top/north entrance
+        # queues downward from the top edge, so those cars face down (180deg).
+        return 180.0 if car.entrance == "north" else 0.0
 
     if state not in {"approaching_gate", "gate_crossing", "searching", "exit_queue", "exiting", "denied"}:
         return None
@@ -1125,9 +1129,9 @@ def _point_along_polyline(points: list[tuple[float, float]], distance: float) ->
 
 def _exit_stop_point(car: CarRecord | None = None) -> tuple[float, float]:
     if car is not None and car.exit_lane == "top":
-        return (EXIT_TOP_LANE_X, EXIT_TOP_STOP_Y)
+        return EXIT_TOP_GATE_POINT
     if car is not None and car.exit_lane == "bottom":
-        return (EXIT_BOTTOM_LANE_X, EXIT_BOTTOM_STOP_Y)
+        return EXIT_BOTTOM_GATE_POINT
     return EXIT_STOP_POINT
 
 
@@ -1136,11 +1140,13 @@ def _exit_queue_slot_point(index: int, car: CarRecord | None = None) -> tuple[fl
     polyline.  Arc-length placement keeps consecutive slots one spacing apart even
     around the bend and snake turns, so advancing cars hug the path."""
     if car is not None and car.exit_lane == "top":
-        # Lane left of centre, climbing to the top exit; cars stack downward.
-        return (EXIT_TOP_LANE_X, EXIT_TOP_STOP_Y + index * EXIT_VERT_QUEUE_SPACING)
+        # Horizontal lane at the top gate; front car at the gate, rest stack left.
+        gx, gy = EXIT_TOP_GATE_POINT
+        return (gx - index * EXIT_HORIZ_QUEUE_SPACING, gy)
     if car is not None and car.exit_lane == "bottom":
-        # Lane right of centre, dropping to the bottom exit; cars stack upward.
-        return (EXIT_BOTTOM_LANE_X, EXIT_BOTTOM_STOP_Y - index * EXIT_VERT_QUEUE_SPACING)
+        # Horizontal lane at the bottom gate; front car at the gate, rest stack left.
+        gx, gy = EXIT_BOTTOM_GATE_POINT
+        return (gx - index * EXIT_HORIZ_QUEUE_SPACING, gy)
     return _point_along_polyline(_exit_queue_path_points(), index * EXIT_VERT_QUEUE_SPACING)
 
 
@@ -1216,11 +1222,11 @@ def _slot_to_exit_queue_path(
     Right-edge connector lanes (x=85 from the top rows, x=77.5 from the bottom
     row) are reused to reach the main road; see _apply_vehicle_spacing.
     """
-    # Two-exit maps: reach the exit lane on the main road, then go straight to the
-    # tail of the top/bottom column (no shared staging lane).
+    # Two-exit maps: run along the main road to the tail's column, then step into
+    # the tail of the horizontal top/bottom queue (joining from the side).
     if car is not None and car.exit_lane in ("top", "bottom"):
-        lane_x = EXIT_TOP_LANE_X if car.exit_lane == "top" else EXIT_BOTTOM_LANE_X
-        merge = [(lane_x, MAIN_ROAD_Y), queue_target]
+        tx, _ = queue_target
+        merge = [(tx, MAIN_ROAD_Y), queue_target]
     else:
         merge = _exit_queue_merge_path(queue_target)
     # Denied vehicles are already coasting along the main road toward the column.

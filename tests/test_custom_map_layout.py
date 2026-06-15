@@ -14,18 +14,18 @@ class CustomMapLayoutTests(unittest.TestCase):
 
         expected = {
             "two_entrance_two_exit": [
-                ("entry", 23.6, 6.6, 7.6),
-                ("entry", 64.2, 6.6, 7.6),
+                ("entry", 29.0, 6.6, 7.6),
+                ("entry", 72.0, 6.6, 7.6),
                 ("exit", 34.2, 92.2, 8.8),
                 ("exit", 69.3, 92.2, 8.8),
             ],
             "two_entrance_one_exit": [
-                ("entry", 23.6, 6.6, 7.6),
-                ("entry", 64.2, 6.6, 7.6),
+                ("entry", 29.0, 6.6, 7.6),
+                ("entry", 72.0, 6.6, 7.6),
                 ("exit", 38.8, 92.2, 8.8),
             ],
             "one_entrance_two_exit": [
-                ("entry", 24.7, 4.8, 7.4),
+                ("entry", 32.0, 4.8, 7.4),
                 ("exit", 34.2, 92.2, 8.8),
                 ("exit", 69.3, 92.2, 8.8),
             ],

@@ -446,18 +446,18 @@ function applyScenarioBackground(scenario) {
 // entry/exit gate-state flags as the default map.
 const SCENARIO_GATES = {
   two_entrance_two_exit: [
-    { type: "entry", top: 23.6, left: 6.6, width: 7.6 },
-    { type: "entry", top: 64.2, left: 6.6, width: 7.6 },
+    { type: "entry", top: 29.0, left: 6.6, width: 7.6 },
+    { type: "entry", top: 72.0, left: 6.6, width: 7.6 },
     { type: "exit", top: 34.2, left: 92.2, width: 8.8 },
     { type: "exit", top: 69.3, left: 92.2, width: 8.8 },
   ],
   two_entrance_one_exit: [
-    { type: "entry", top: 23.6, left: 6.6, width: 7.6 },
-    { type: "entry", top: 64.2, left: 6.6, width: 7.6 },
+    { type: "entry", top: 29.0, left: 6.6, width: 7.6 },
+    { type: "entry", top: 72.0, left: 6.6, width: 7.6 },
     { type: "exit", top: 38.8, left: 92.2, width: 8.8 },
   ],
   one_entrance_two_exit: [
-    { type: "entry", top: 24.7, left: 4.8, width: 7.4 },
+    { type: "entry", top: 32.0, left: 4.8, width: 7.4 },
     { type: "exit", top: 34.2, left: 92.2, width: 8.8 },
     { type: "exit", top: 69.3, left: 92.2, width: 8.8 },
   ],

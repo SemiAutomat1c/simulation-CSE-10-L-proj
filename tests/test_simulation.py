@@ -718,6 +718,29 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertTrue(entry_headings)
         self.assertTrue(all(abs(heading or 0.0) <= 1.0 for heading in entry_headings))
 
+    def test_top_entrance_vehicles_face_downward_before_gate(self) -> None:
+        # On two-entrance maps the top (north) lane queues down from the top edge,
+        # so those cars must face down (180deg), not up like the bottom lane.
+        payload = self.scenario_payload("two_entrance_two_exit")
+
+        north_headings = [
+            car["heading"]
+            for frame in payload["frames"]
+            for car in frame["cars"]
+            if car["id"] == 1 and car["state"] in {"entry_queue", "gate_wait"}
+        ]
+        south_headings = [
+            car["heading"]
+            for frame in payload["frames"]
+            for car in frame["cars"]
+            if car["id"] == 2 and car["state"] in {"entry_queue", "gate_wait"}
+        ]
+
+        self.assertTrue(north_headings)
+        self.assertTrue(all(abs((heading or 0.0) - 180.0) <= 1.0 for heading in north_headings))
+        self.assertTrue(south_headings)
+        self.assertTrue(all(abs(heading or 0.0) <= 1.0 for heading in south_headings))
+
     def test_first_vehicle_progresses_through_gate_stop_sequence(self) -> None:
         payload = self.scenario_payload("baseline")
 
@@ -815,16 +838,21 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertIn("top", lanes)
         self.assertIn("bottom", lanes)
         self.assertNotIn("single", lanes)
-        # The two columns sit on opposite sides of the exit-road centre line.
-        # (Filter to cars settled in the column, not still approaching on the road.)
-        def column_xs(lane):
-            return {
-                round(car["x"], 1)
+        # Each exit is a HORIZONTAL queue at its own gate level: the top queue
+        # settles in an upper band, the bottom queue in a lower band, and the two
+        # bands never overlap (so the lanes read as separate, not one column).
+        def band_ys(lane, lo, hi):
+            return [
+                car["y"]
                 for frame in payload["frames"]
                 for car in frame["cars"]
-                if car["state"] == "exit_queue" and car.get("exit_lane") == lane and car["x"] >= 84.0
-            }
-        self.assertTrue(max(column_xs("top")) < min(column_xs("bottom")))
+                if car["state"] == "exit_queue" and car.get("exit_lane") == lane and lo <= car["y"] <= hi
+            ]
+        top_band = band_ys("top", 20.0, 45.0)
+        bottom_band = band_ys("bottom", 55.0, 80.0)
+        self.assertTrue(top_band)
+        self.assertTrue(bottom_band)
+        self.assertLess(max(top_band), min(bottom_band))
 
     def test_two_entrance_map_cars_stop_at_their_gate_then_turn_into_loop(self) -> None:
         payload = self.scenario_payload("two_entrance_two_exit")
@@ -843,15 +871,15 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertTrue(north)
         self.assertTrue(south)
 
-        # North: crosses the top gate (y around 23) and turns right into the loop
+        # North: crosses the top gate (y around 29) and turns right into the loop
         # lane at x=25 without short-cutting diagonally across the lot.
-        self.assertTrue(any(abs(car["x"] - 8.0) <= 0.2 and 20.0 <= car["y"] <= 30.0 for car in north))
+        self.assertTrue(any(abs(car["x"] - 8.0) <= 0.2 and 26.0 <= car["y"] <= 33.0 for car in north))
         self.assertTrue(any(abs(car["x"] - 25.0) <= 0.6 and 33.0 <= car["y"] <= 37.0 for car in north))
 
-        # South (lower gate): the car stops at its OWN gate near y=64 and turns
+        # South (lower gate): the car stops at its OWN gate near y=72 and turns
         # into the loop at the main-road level (~55.7) — it never drives up to the
         # top-corner entry.
-        self.assertTrue(any(abs(car["x"] - 8.0) <= 0.2 and 60.0 <= car["y"] <= 70.0 for car in south))
+        self.assertTrue(any(abs(car["x"] - 8.0) <= 0.2 and 70.0 <= car["y"] <= 80.0 for car in south))
         self.assertTrue(any(abs(car["x"] - 25.0) <= 0.6 and 53.0 <= car["y"] <= 57.0 for car in south))
         self.assertFalse(any(abs(car["x"] - 8.0) <= 0.2 and car["y"] < 40.0 for car in south))
 
