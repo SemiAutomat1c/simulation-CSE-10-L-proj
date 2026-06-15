@@ -266,7 +266,8 @@ function tick(timestamp) {
   }
 
   if (!lastTick) lastTick = timestamp;
-  const currentInterval = 400 / speedMultiplier;
+  // Base frame interval. 1x now plays at what used to be 10x; the slider goes up from there.
+  const currentInterval = 40 / speedMultiplier;
   const elapsed = timestamp - lastTick;
   const subProgress = Math.min(1, elapsed / currentInterval);
 
@@ -345,7 +346,7 @@ if (speedSlider && speedValue) {
   speedSlider.addEventListener("input", (event) => {
     speedMultiplier = parseFloat(event.target.value);
     speedValue.textContent = `${speedMultiplier.toFixed(2)}x`;
-    const duration = Math.round(400 / speedMultiplier);
+    const duration = Math.round(40 / speedMultiplier);
     document.documentElement.style.setProperty("--transition-duration", `${duration}ms`);
   });
 }
