@@ -139,6 +139,47 @@ SCENARIO_PROFILES = {
         "exit_service": 4.0,
         "base_search": 1.6,
     },
+    # Gate-layout configurations (rendered on dedicated maps). Gate counts are baked
+    # into the profile so they affect the metrics; the animation keeps the shared lot.
+    "two_entrance_two_exit": {
+        "seed": 606,
+        "total_cars": 64,
+        "slot_count": 72,
+        "arrival_mode": "clustered",
+        "early_window": (0, 4),
+        "cluster_window": (5, 18),
+        "entry_service": 1.0,
+        "exit_service": 1.6,
+        "base_search": 1.7,
+        "entry_gates": 2,
+        "exit_gates": 2,
+    },
+    "two_entrance_one_exit": {
+        "seed": 707,
+        "total_cars": 60,
+        "slot_count": 72,
+        "arrival_mode": "clustered",
+        "early_window": (0, 4),
+        "cluster_window": (5, 18),
+        "entry_service": 1.0,
+        "exit_service": 1.2,
+        "base_search": 1.8,
+        "entry_gates": 2,
+        "exit_gates": 1,
+    },
+    "one_entrance_two_exit": {
+        "seed": 808,
+        "total_cars": 56,
+        "slot_count": 72,
+        "arrival_mode": "spread",
+        "arrival_start": 0,
+        "arrival_end": 60,
+        "entry_service": 0.7,
+        "exit_service": 2.6,
+        "base_search": 1.6,
+        "entry_gates": 1,
+        "exit_gates": 2,
+    },
 }
 
 ENTRY_LANE_X = 8.0

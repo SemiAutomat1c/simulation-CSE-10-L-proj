@@ -792,6 +792,17 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertEqual(metrics["total_vehicle_count"], 80)
         self.assertEqual(metrics["total_slots"], 40)
 
+    def test_gate_layout_scenarios_have_expected_gate_counts(self) -> None:
+        expected = {
+            "two_entrance_two_exit": (2, 2),
+            "two_entrance_one_exit": (2, 1),
+            "one_entrance_two_exit": (1, 2),
+        }
+        for scenario, (entries, exits) in expected.items():
+            metrics = self.scenario_payload(scenario)["metrics"]
+            self.assertEqual(metrics["entry_gate_count"], entries, scenario)
+            self.assertEqual(metrics["exit_gate_count"], exits, scenario)
+
     def test_adding_an_entry_gate_reduces_entry_wait(self) -> None:
         one = run_simulation(ParkingSimulationConfig(scenario="rush_hour", entry_gates=1)).metrics
         two = run_simulation(ParkingSimulationConfig(scenario="rush_hour", entry_gates=2)).metrics

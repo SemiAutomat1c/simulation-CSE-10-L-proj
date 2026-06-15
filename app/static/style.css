@@ -978,3 +978,15 @@ select:disabled,
   outline: none;
   border-color: var(--orange);
 }
+
+/* ---- Custom gate-layout maps: hide overlay markers tuned to the base map ---- */
+.custom-map .entry-zone,
+.custom-map .exit-zone,
+.custom-map .mall-footprint,
+.custom-map .gate-arm,
+.custom-map .exit-gate-arm,
+.custom-map .map-label,
+.custom-map .queue-lane,
+.custom-map .route-arrow {
+  display: none !important;
+}

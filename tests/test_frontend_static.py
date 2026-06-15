@@ -15,8 +15,8 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("parkingStage", html)
         self.assertIn("slotLayer", html)
         self.assertIn("carLayer", html)
-        self.assertIn('/static/style.css?v=22', html)
-        self.assertIn('/static/app.js?v=18', html)
+        self.assertIn('/static/style.css?v=23', html)
+        self.assertIn('/static/app.js?v=19', html)
         self.assertIn("metricMotorcycles", html)
         self.assertIn("Vehicle Mix", html)
         self.assertIn("simulationStatus", html)
@@ -111,6 +111,14 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("entry_gates", js)
         self.assertIn("total_cars", js)
         self.assertIn("applyParamsButton", js)
+
+    def test_frontend_switches_background_per_gate_layout(self) -> None:
+        js = (self.static_dir / "app.js").read_text()
+
+        self.assertIn("SCENARIO_BACKGROUNDS", js)
+        self.assertIn("applyScenarioBackground", js)
+        self.assertIn("two_entrance_two_exit", js)
+        self.assertIn("custom-map", js)
 
     def test_frontend_skips_corner_cutting_interpolation_for_gate_exit_turns(self) -> None:
         js = (self.static_dir / "app.js").read_text()

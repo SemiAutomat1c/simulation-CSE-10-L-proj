@@ -16,6 +16,9 @@ SCENARIOS = {
     "limited_slots": "Reduced parking capacity that forces some cars to be denied",
     "slow_entry": "Slower entrance gate processing creates a visible entry queue",
     "exit_congestion": "Slower exit throughput creates post-shopping congestion",
+    "two_entrance_two_exit": "Two entry gates and two exit gates share the load",
+    "two_entrance_one_exit": "Two entry gates feed a single exit gate",
+    "one_entrance_two_exit": "One entry gate, two exit gates clear the post-shopping surge",
 }
 
 
