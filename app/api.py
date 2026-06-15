@@ -35,10 +35,36 @@ def create_app() -> FastAPI:
         return {"scenarios": SCENARIOS}
 
     @app.get("/api/simulation")
-    def simulation(scenario: str = "baseline") -> dict:
+    def simulation(
+        scenario: str = "baseline",
+        total_cars: int | None = None,
+        slot_count: int | None = None,
+        entry_service: float | None = None,
+        exit_service: float | None = None,
+        base_search: float | None = None,
+        seed: int | None = None,
+        entry_gates: int | None = None,
+        exit_gates: int | None = None,
+    ) -> dict:
         if scenario not in SCENARIOS:
             scenario = "baseline"
-        result = run_simulation(ParkingSimulationConfig(scenario=scenario))
+
+        def clamp(value, lo, hi):
+            return None if value is None else max(lo, min(hi, value))
+
+        result = run_simulation(
+            ParkingSimulationConfig(
+                scenario=scenario,
+                total_cars=clamp(total_cars, 1, 200),
+                slot_count=clamp(slot_count, 1, 72),
+                entry_service=clamp(entry_service, 0.1, 15.0),
+                exit_service=clamp(exit_service, 0.1, 15.0),
+                base_search=clamp(base_search, 0.1, 15.0),
+                seed=seed,
+                entry_gates=clamp(entry_gates, 1, 4),
+                exit_gates=clamp(exit_gates, 1, 4),
+            )
+        )
         return result.to_dict()
 
     @app.get("/api/compare")

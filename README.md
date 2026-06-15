@@ -98,7 +98,8 @@ Unknown scenario names fall back to `baseline`.
 - `average_entry_service_minutes` / `average_exit_service_minutes`: Average processing (service) time at each gate.
 - `average_time_in_system_minutes`: Average total time from arrival to departure (cycle time).
 - `throughput_vehicles_per_hour`: Completed vehicles divided by the run length, in vehicles per hour.
-- `entry_gate_utilization_percent` / `exit_gate_utilization_percent`: Fraction of the run each (capacity-1) gate was busy serving a vehicle.
+- `entry_gate_utilization_percent` / `exit_gate_utilization_percent`: Busy server-time divided by available server-time at each gate (capacity-aware, so it stays 0–100% even with multiple gates).
+- `entry_gate_count` / `exit_gate_count`: Number of parallel gates used for the run.
 - `average_entry_queue_length` / `average_exit_queue_length`: Time-averaged queue length at each gate.
 
 ## API Endpoints
@@ -115,6 +116,23 @@ GET /api/simulation?scenario=baseline
 
 Returns the selected scenario, initial slots, generated timeline frames, and summary metrics. The JSON shape is intentionally stable for the frontend and tests.
 
+Optional query parameters override the scenario's inputs live (each is clamped to a safe range):
+
+| Parameter | Range | Effect |
+| --- | --- | --- |
+| `total_cars` | 1–200 | Number of vehicles generated |
+| `slot_count` | 1–72 | Usable parking spaces |
+| `entry_service` / `exit_service` | 0.1–15 | Gate service time (minutes) |
+| `base_search` | 0.1–15 | Base slot-search time (minutes) |
+| `entry_gates` / `exit_gates` | 1–4 | Number of parallel gates (resource capacity) |
+| `seed` | any int | Random seed |
+
+Example: `GET /api/simulation?scenario=rush_hour&entry_gates=2` models a second entry gate
+("one cashier vs. two cashiers"). The dashboard's **Custom Inputs** panel sends these same
+parameters so values can be typed and applied live during a demo. Note: gate counts above 1
+change the metrics correctly, but the bundled single-gate map renders both served vehicles at
+one gate position — a multi-gate background is needed to animate them in separate lanes.
+
 ```text
 GET /api/compare
 ```
@@ -129,7 +147,8 @@ Returns metrics-only results for every scenario (no frames) for side-by-side com
 4. Switch to `limited_slots` and show denied vehicles plus the denied counters.
 5. Switch to `slow_entry` or `exit_congestion` to isolate one bottleneck at a time.
 6. Use the speed slider and replay button to revisit interesting moments.
-7. Run `python3 -m unittest` to show the behavior is covered by automated tests.
+7. Use the **Custom Inputs** panel to change vehicles, slots, gate counts, or service times live, then **Apply & run** (great for "what if we add a second gate?" questions).
+8. Run `python3 -m unittest` to show the behavior is covered by automated tests.
 
 ## Documentation (CSE 10/L deliverables)
 

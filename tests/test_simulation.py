@@ -785,6 +785,23 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertGreater(congested["average_exit_wait_minutes"], baseline["average_exit_wait_minutes"])
         self.assertGreater(congested["exit_gate_utilization_percent"], baseline["exit_gate_utilization_percent"])
 
+    def test_custom_overrides_change_inputs(self) -> None:
+        metrics = run_simulation(
+            ParkingSimulationConfig(scenario="baseline", total_cars=80, slot_count=40)
+        ).metrics
+        self.assertEqual(metrics["total_vehicle_count"], 80)
+        self.assertEqual(metrics["total_slots"], 40)
+
+    def test_adding_an_entry_gate_reduces_entry_wait(self) -> None:
+        one = run_simulation(ParkingSimulationConfig(scenario="rush_hour", entry_gates=1)).metrics
+        two = run_simulation(ParkingSimulationConfig(scenario="rush_hour", entry_gates=2)).metrics
+
+        self.assertEqual(one["entry_gate_count"], 1)
+        self.assertEqual(two["entry_gate_count"], 2)
+        # A second server cuts the queue waiting time and per-server utilisation.
+        self.assertLess(two["average_entry_wait_minutes"], one["average_entry_wait_minutes"])
+        self.assertLessEqual(two["entry_gate_utilization_percent"], one["entry_gate_utilization_percent"])
+
 
 if __name__ == "__main__":
     unittest.main()

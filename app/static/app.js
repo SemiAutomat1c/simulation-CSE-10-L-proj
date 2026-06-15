@@ -390,11 +390,32 @@ function tick(timestamp) {
   window.requestAnimationFrame(tick);
 }
 
+function customParamQuery() {
+  const fields = [
+    ["total_cars", "inputCars"],
+    ["slot_count", "inputSlots"],
+    ["entry_gates", "inputEntryGates"],
+    ["exit_gates", "inputExitGates"],
+    ["entry_service", "inputEntryService"],
+    ["exit_service", "inputExitService"],
+  ];
+  let query = "";
+  for (const [param, id] of fields) {
+    const el = document.getElementById(id);
+    if (el && el.value !== "" && el.value !== null) {
+      query += `&${param}=${encodeURIComponent(el.value)}`;
+    }
+  }
+  return query;
+}
+
 async function loadSimulation(scenario) {
   setLoadingState(true);
   setSimulationStatus(`Loading ${scenarioLabel(scenario)}...`, "loading");
   try {
-    const nextSimulationData = await fetchJson(`/api/simulation?scenario=${encodeURIComponent(scenario)}&t=${Date.now()}`);
+    const nextSimulationData = await fetchJson(
+      `/api/simulation?scenario=${encodeURIComponent(scenario)}${customParamQuery()}&t=${Date.now()}`
+    );
     simulationData = nextSimulationData;
     carLayer.innerHTML = "";
     carNodes = new Map();
@@ -452,6 +473,21 @@ replayButton.addEventListener("click", () => {
 
 if (compareButton) {
   compareButton.addEventListener("click", toggleCompare);
+}
+
+const applyParamsButton = document.getElementById("applyParamsButton");
+const resetParamsButton = document.getElementById("resetParamsButton");
+if (applyParamsButton) {
+  applyParamsButton.addEventListener("click", async () => {
+    await loadSimulation(scenarioSelect.value);
+  });
+}
+if (resetParamsButton) {
+  resetParamsButton.addEventListener("click", async () => {
+    ["inputCars", "inputSlots", "inputEntryGates", "inputExitGates", "inputEntryService", "inputExitService"]
+      .forEach((id) => { const el = document.getElementById(id); if (el) el.value = ""; });
+    await loadSimulation(scenarioSelect.value);
+  });
 }
 
 if (speedSlider && speedValue) {

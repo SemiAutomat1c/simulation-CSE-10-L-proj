@@ -10,6 +10,15 @@ import simpy
 class ParkingSimulationConfig:
     scenario: str = "baseline"
     snapshot_interval_minutes: float = 0.05
+    # Optional live overrides (None = use the scenario profile's value).
+    total_cars: int | None = None
+    slot_count: int | None = None
+    entry_service: float | None = None
+    exit_service: float | None = None
+    base_search: float | None = None
+    seed: int | None = None
+    entry_gates: int | None = None
+    exit_gates: int | None = None
 
 
 @dataclass(frozen=True)
@@ -196,7 +205,25 @@ EXIT_HORIZ_QUEUE_SPACING = 6.4
 
 def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
     scenario = config.scenario if config.scenario in SCENARIO_PROFILES else "baseline"
-    profile = SCENARIO_PROFILES[scenario]
+    base_profile = SCENARIO_PROFILES[scenario]
+    profile = dict(base_profile)
+    # Apply live overrides on top of the scenario profile.
+    if config.total_cars is not None:
+        profile["total_cars"] = config.total_cars
+    if config.slot_count is not None:
+        profile["slot_count"] = config.slot_count
+        profile["visible_slot_count"] = config.slot_count
+        profile["usable_slot_count"] = config.slot_count
+    if config.entry_service is not None:
+        profile["entry_service"] = config.entry_service
+    if config.exit_service is not None:
+        profile["exit_service"] = config.exit_service
+    if config.base_search is not None:
+        profile["base_search"] = config.base_search
+    if config.seed is not None:
+        profile["seed"] = config.seed
+    entry_capacity = max(1, config.entry_gates or base_profile.get("entry_gates", 1))
+    exit_capacity = max(1, config.exit_gates or base_profile.get("exit_gates", 1))
     rng = random.Random(profile["seed"])
     visible_slot_count = profile.get("visible_slot_count", profile["slot_count"])
     usable_slot_count = profile.get("usable_slot_count", profile["slot_count"])
@@ -216,8 +243,8 @@ def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
     ]
 
     env = simpy.Environment()
-    entry_gate = simpy.Resource(env, capacity=1)
-    exit_gate = simpy.Resource(env, capacity=1)
+    entry_gate = simpy.Resource(env, capacity=entry_capacity)
+    exit_gate = simpy.Resource(env, capacity=exit_capacity)
 
     def car_process(car: CarRecord):
         yield env.timeout(car.arrival_time)
@@ -290,7 +317,7 @@ def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
 
     env.run()
     frames = _build_frames(slots, cars, config.snapshot_interval_minutes, usable_slot_ids)
-    metrics = _build_metrics(slots, cars, frames, usable_slot_ids)
+    metrics = _build_metrics(slots, cars, frames, usable_slot_ids, entry_capacity, exit_capacity)
     return ParkingSimulationResult(
         scenario=scenario,
         slots=slots,
@@ -1217,6 +1244,8 @@ def _build_metrics(
     cars: list[CarRecord],
     frames: list[dict],
     usable_slot_ids: set[str],
+    entry_capacity: int = 1,
+    exit_capacity: int = 1,
 ) -> dict:
     search_times = [
         car.park_start - car.search_start
@@ -1297,7 +1326,7 @@ def _build_metrics(
     end_minute = max((frame["time_minutes"] for frame in frames), default=0.0) or 0.0
     throughput_per_hour = round(completed_vehicles / (end_minute / 60.0), 2) if end_minute > 0 else 0.0
 
-    # Resource utilisation = fraction of the run each gate (capacity 1) was held busy.
+    # Resource utilisation = busy server-time / available server-time (capacity-aware).
     entry_busy = sum(
         (car.search_start if car.search_start is not None else car.denied_time) - car.approach_start
         for car in cars
@@ -1309,8 +1338,8 @@ def _build_metrics(
         for car in cars
         if car.exit_road_start is not None and car.exit_start is not None
     )
-    entry_gate_util = round(min(entry_busy / end_minute, 1.0) * 100, 1) if end_minute > 0 else 0.0
-    exit_gate_util = round(min(exit_busy / end_minute, 1.0) * 100, 1) if end_minute > 0 else 0.0
+    entry_gate_util = round(min(entry_busy / (end_minute * entry_capacity), 1.0) * 100, 1) if end_minute > 0 else 0.0
+    exit_gate_util = round(min(exit_busy / (end_minute * exit_capacity), 1.0) * 100, 1) if end_minute > 0 else 0.0
 
     avg_entry_queue = round(sum(f["current_entry_queue"] for f in frames) / len(frames), 2) if frames else 0.0
     avg_exit_queue = round(sum(f["current_exit_queue"] for f in frames) / len(frames), 2) if frames else 0.0
@@ -1353,6 +1382,8 @@ def _build_metrics(
         "throughput_vehicles_per_hour": throughput_per_hour,
         "entry_gate_utilization_percent": entry_gate_util,
         "exit_gate_utilization_percent": exit_gate_util,
+        "entry_gate_count": entry_capacity,
+        "exit_gate_count": exit_capacity,
         "average_entry_queue_length": avg_entry_queue,
         "average_exit_queue_length": avg_exit_queue,
     }
