@@ -101,16 +101,16 @@ class CustomMapLayoutTests(unittest.TestCase):
     def test_two_entrance_one_exit_uses_its_own_vehicle_grid_transform(self) -> None:
         js = (self.static_dir / "app.js").read_text()
 
-        self.assertIn("let activeScenario = \"baseline\";", js)
-        self.assertIn("const CUSTOM_MAP_SCENARIO_TRANSFORMS = {", js)
+        self.assertIn("let activeMap = \"one_entrance_one_exit\";", js)
+        self.assertIn("const CUSTOM_MAP_TRANSFORMS = {", js)
         self.assertIn("two_entrance_one_exit: {", js)
         self.assertIn("xScale: 0.99270", js)
         self.assertIn("xOffset: 0.27096", js)
         self.assertIn("rowYOffsets: { 1: 2.6, 2: 2.6 },", js)
         self.assertIn("function rowFromSlotId(slotId) {", js)
         self.assertIn("const rowOffset = transform.rowYOffsets?.[row] || 0;", js)
-        self.assertIn("activeScenario = scenario;", js)
-        self.assertIn("CUSTOM_MAP_SCENARIO_TRANSFORMS[activeScenario] || CUSTOM_MAP_COORDINATE_TRANSFORM", js)
+        self.assertIn("activeMap = map;", js)
+        self.assertIn("CUSTOM_MAP_TRANSFORMS[activeMap] || CUSTOM_MAP_COORDINATE_TRANSFORM", js)
 
     def test_parking_row_offset_does_not_shift_exit_queues(self) -> None:
         js = (self.static_dir / "app.js").read_text()

@@ -9,6 +9,8 @@ import simpy
 @dataclass(frozen=True)
 class ParkingSimulationConfig:
     scenario: str = "baseline"
+    # Gate layout (entrance/exit count + visual). Independent of the demand scenario.
+    map: str = "one_entrance_one_exit"
     snapshot_interval_minutes: float = 0.05
     # Optional live overrides (None = use the scenario profile's value).
     total_cars: int | None = None
@@ -17,6 +19,7 @@ class ParkingSimulationConfig:
     exit_service: float | None = None
     base_search: float | None = None
     seed: int | None = None
+    # Optional gate-capacity overrides (not exposed in the UI; the map sets gates).
     entry_gates: int | None = None
     exit_gates: int | None = None
 
@@ -143,47 +146,16 @@ SCENARIO_PROFILES = {
         "exit_service": 4.0,
         "base_search": 1.6,
     },
-    # Gate-layout configurations (rendered on dedicated maps). Gate counts are baked
-    # into the profile so they affect the metrics; the animation keeps the shared lot.
-    "two_entrance_two_exit": {
-        "seed": 606,
-        "total_cars": 56,
-        "slot_count": 72,
-        "arrival_mode": "spread",
-        "arrival_start": 0,
-        "arrival_end": 60,
-        "entry_service": 1.0,
-        "exit_service": 1.2,
-        "base_search": 1.7,
-        "entry_gates": 2,
-        "exit_gates": 2,
-    },
-    "two_entrance_one_exit": {
-        "seed": 707,
-        "total_cars": 60,
-        "slot_count": 72,
-        "arrival_mode": "clustered",
-        "early_window": (0, 4),
-        "cluster_window": (5, 18),
-        "entry_service": 1.0,
-        "exit_service": 1.2,
-        "base_search": 1.8,
-        "entry_gates": 2,
-        "exit_gates": 1,
-    },
-    "one_entrance_two_exit": {
-        "seed": 808,
-        "total_cars": 56,
-        "slot_count": 72,
-        "arrival_mode": "spread",
-        "arrival_start": 0,
-        "arrival_end": 60,
-        "entry_service": 0.7,
-        "exit_service": 2.6,
-        "base_search": 1.6,
-        "entry_gates": 1,
-        "exit_gates": 2,
-    },
+}
+
+# Gate layouts, chosen independently of the demand scenario. A map sets how many
+# entry/exit gates exist (and therefore the background image + entrance/exit split);
+# the demand (cars, arrival, service, slots) comes from the scenario profile above.
+MAP_CONFIGS = {
+    "one_entrance_one_exit": {"entry_gates": 1, "exit_gates": 1},
+    "two_entrance_one_exit": {"entry_gates": 2, "exit_gates": 1},
+    "one_entrance_two_exit": {"entry_gates": 1, "exit_gates": 2},
+    "two_entrance_two_exit": {"entry_gates": 2, "exit_gates": 2},
 }
 
 ENTRY_LANE_X = 8.0
@@ -276,6 +248,8 @@ EXIT_TWO_LANE_MIN_X = 26.0
 def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
     scenario = config.scenario if config.scenario in SCENARIO_PROFILES else "baseline"
     base_profile = SCENARIO_PROFILES[scenario]
+    # The map (not the scenario) decides the gate layout.
+    map_config = MAP_CONFIGS.get(config.map, MAP_CONFIGS["one_entrance_one_exit"])
     profile = dict(base_profile)
     # Apply live overrides on top of the scenario profile.
     if config.total_cars is not None:
@@ -292,8 +266,8 @@ def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
         profile["base_search"] = config.base_search
     if config.seed is not None:
         profile["seed"] = config.seed
-    entry_capacity = max(1, config.entry_gates or base_profile.get("entry_gates", 1))
-    exit_capacity = max(1, config.exit_gates or base_profile.get("exit_gates", 1))
+    entry_capacity = max(1, config.entry_gates or map_config["entry_gates"])
+    exit_capacity = max(1, config.exit_gates or map_config["exit_gates"])
     rng = random.Random(profile["seed"])
     visible_slot_count = profile.get("visible_slot_count", profile["slot_count"])
     usable_slot_count = profile.get("usable_slot_count", profile["slot_count"])
@@ -313,7 +287,7 @@ def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
     ]
     # On maps with two physical entrances, split arrivals between the top (north)
     # and the default (south) entry lanes so cars visibly appear at both.
-    if base_profile.get("entry_gates", 1) >= 2:
+    if map_config["entry_gates"] >= 2:
         for index, car in enumerate(cars):
             car.entrance = "north" if index % 2 == 0 else "south"
             car.two_entrance = True
@@ -321,7 +295,7 @@ def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
     # Both two-exit maps queue horizontally beside each booth (the two gates sit at
     # very different heights, so the lines never meet); the vertical EXIT FLOW lanes
     # are too narrow to hold two columns between the closely-stacked booths.
-    if base_profile.get("exit_gates", 1) >= 2:
+    if map_config["exit_gates"] >= 2:
         for index, car in enumerate(cars):
             car.exit_lane = "top" if index % 2 == 0 else "bottom"
             car.exit_layout = "horizontal_split"
@@ -331,7 +305,7 @@ def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
     # On two-exit maps each painted booth is its own single-file gate. Give every
     # exit lane a dedicated resource so the shared-capacity pool can't grant two
     # permits to cars on the *same* lane (which renders them stacked at one throat).
-    two_exit_lanes = base_profile.get("exit_gates", 1) >= 2
+    two_exit_lanes = map_config["exit_gates"] >= 2
     if two_exit_lanes:
         per_lane_capacity = max(1, exit_capacity // 2)
         exit_gates = {

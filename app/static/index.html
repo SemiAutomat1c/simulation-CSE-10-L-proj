@@ -18,6 +18,10 @@
         <section class="panel">
           <h2>Run</h2>
           <label class="field">
+            <span>Map</span>
+            <select id="mapSelect"></select>
+          </label>
+          <label class="field" style="margin-top: 8px;">
             <span>Scenario</span>
             <select id="scenarioSelect"></select>
           </label>
@@ -41,8 +45,6 @@
           <div class="param-grid">
             <label class="param"><span>Vehicles</span><input id="inputCars" type="number" min="1" max="200" placeholder="auto" /></label>
             <label class="param"><span>Slots</span><input id="inputSlots" type="number" min="1" max="72" placeholder="auto" /></label>
-            <label class="param"><span>Entry gates</span><input id="inputEntryGates" type="number" min="1" max="4" placeholder="1" /></label>
-            <label class="param"><span>Exit gates</span><input id="inputExitGates" type="number" min="1" max="4" placeholder="1" /></label>
             <label class="param"><span>Entry svc (min)</span><input id="inputEntryService" type="number" min="0.1" max="15" step="0.1" placeholder="auto" /></label>
             <label class="param"><span>Exit svc (min)</span><input id="inputExitService" type="number" min="0.1" max="15" step="0.1" placeholder="auto" /></label>
           </div>
@@ -145,6 +147,6 @@
       </main>
     </div>
 
-    <script src="/static/app.js?v=23" type="module"></script>
+    <script src="/static/app.js?v=24" type="module"></script>
   </body>
 </html>

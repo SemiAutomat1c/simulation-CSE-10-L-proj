@@ -1,4 +1,5 @@
 const scenarioSelect = document.getElementById("scenarioSelect");
+const mapSelect = document.getElementById("mapSelect");
 const playPauseButton = document.getElementById("playPauseButton");
 const replayButton = document.getElementById("replayButton");
 const slotLayer = document.getElementById("slotLayer");
@@ -47,7 +48,7 @@ let compareData = null;
 let frameIndex = 0;
 let lastTick = 0;
 let playing = true;
-let activeScenario = "baseline";
+let activeMap = "one_entrance_one_exit";
 let slotNodes = new Map();
 let carNodes = new Map();
 let previousVehiclePoints = new Map();
@@ -91,7 +92,7 @@ const CUSTOM_MAP_COORDINATE_TRANSFORM = {
   yOffset: 2.42282,
 };
 
-const CUSTOM_MAP_SCENARIO_TRANSFORMS = {
+const CUSTOM_MAP_TRANSFORMS = {
   two_entrance_one_exit: {
     xScale: 0.99270,
     xOffset: 0.27096,
@@ -146,7 +147,7 @@ function mapScenePoint(x, y, options = {}) {
   if (!usesCustomCoordinateGrid(x, y)) {
     return { x, y };
   }
-  const transform = CUSTOM_MAP_SCENARIO_TRANSFORMS[activeScenario] || CUSTOM_MAP_COORDINATE_TRANSFORM;
+  const transform = CUSTOM_MAP_TRANSFORMS[activeMap] || CUSTOM_MAP_COORDINATE_TRANSFORM;
   const rowOffset = rowSceneOffset(transform, y, options.row);
   const transformedX = clampPercent(x * transform.xScale + transform.xOffset);
   const transformedY = clampPercent(y * transform.yScale + transform.yOffset + rowOffset);
@@ -419,8 +420,11 @@ function renderCompare(payload) {
 }
 
 async function ensureCompareData() {
-  if (compareData) return compareData;
-  compareData = await fetchJson(`/api/compare?t=${Date.now()}`);
+  const map = mapSelect.value || "one_entrance_one_exit";
+  // Cache per map; comparing the scenarios is map-specific.
+  if (compareData && compareData.__map === map) return compareData;
+  compareData = await fetchJson(`/api/compare?map=${encodeURIComponent(map)}&t=${Date.now()}`);
+  compareData.__map = map;
   return compareData;
 }
 
@@ -474,27 +478,27 @@ function tick(timestamp) {
 }
 
 const DEFAULT_BACKGROUND = "/static/assets/generated/custom-parking-background.png";
-const SCENARIO_BACKGROUNDS = {
+const MAP_BACKGROUNDS = {
   two_entrance_two_exit: "/static/assets/generated/map-two-entrance-two-exit.png?v=3",
   two_entrance_one_exit: "/static/assets/generated/map-two-entrance-one-exit.png?v=3",
   one_entrance_two_exit: "/static/assets/generated/map-one-entrance-two-exit.png?v=3",
 };
 
-function applyScenarioBackground(scenario) {
-  activeScenario = scenario;
-  const custom = SCENARIO_BACKGROUNDS[scenario];
+function applyMap(map) {
+  activeMap = map;
+  const custom = MAP_BACKGROUNDS[map];
   const url = custom || DEFAULT_BACKGROUND;
   document.documentElement.style.setProperty("--map-background", `url("${url}")`);
   // Custom maps draw their own labels, so hide the base-map overlay markers; the
   // animated gate arms are rebuilt per-map below.
   document.body.classList.toggle("custom-map", Boolean(custom));
-  buildCustomGates(scenario);
+  buildCustomGates(map);
 }
 
 // Animated gate arms per gate-layout map. Positions are % of the map surface
 // (top/left); arms rotate open via the .map-gate.open class, driven by the same
 // entry/exit gate-state flags as the default map.
-const SCENARIO_GATES = {
+const MAP_GATES = {
   two_entrance_two_exit: [
     { type: "entry", top: 29.0, left: 6.6, width: 7.6 },
     { type: "entry", top: 72.0, left: 6.6, width: 7.6 },
@@ -515,11 +519,11 @@ const SCENARIO_GATES = {
 
 let customGateNodes = [];
 
-function buildCustomGates(scenario) {
+function buildCustomGates(mapName) {
   const map = document.getElementById("parkingMap");
   customGateNodes.forEach((n) => n.remove());
   customGateNodes = [];
-  const gates = SCENARIO_GATES[scenario];
+  const gates = MAP_GATES[mapName];
   if (!map || !gates) return;
   gates.forEach((g) => {
     const arm = document.createElement("div");
@@ -537,8 +541,6 @@ function customParamQuery() {
   const fields = [
     ["total_cars", "inputCars"],
     ["slot_count", "inputSlots"],
-    ["entry_gates", "inputEntryGates"],
-    ["exit_gates", "inputExitGates"],
     ["entry_service", "inputEntryService"],
     ["exit_service", "inputExitService"],
   ];
@@ -552,13 +554,15 @@ function customParamQuery() {
   return query;
 }
 
-async function loadSimulation(scenario) {
+async function loadSimulation() {
+  const scenario = scenarioSelect.value || "baseline";
+  const map = mapSelect.value || "one_entrance_one_exit";
   setLoadingState(true);
   setSimulationStatus(`Loading ${scenarioLabel(scenario)}...`, "loading");
-  applyScenarioBackground(scenario);
+  applyMap(map);
   try {
     const nextSimulationData = await fetchJson(
-      `/api/simulation?scenario=${encodeURIComponent(scenario)}${customParamQuery()}&t=${Date.now()}`
+      `/api/simulation?map=${encodeURIComponent(map)}&scenario=${encodeURIComponent(scenario)}${customParamQuery()}&t=${Date.now()}`
     );
     simulationData = nextSimulationData;
     carLayer.innerHTML = "";
@@ -576,20 +580,27 @@ async function loadSimulation(scenario) {
   }
 }
 
+function populateSelect(select, entries) {
+  select.innerHTML = "";
+  Object.entries(entries).forEach(([key, description]) => {
+    const option = document.createElement("option");
+    option.value = key;
+    option.textContent = scenarioLabel(key);
+    option.title = description;
+    select.appendChild(option);
+  });
+}
+
 async function loadScenarios() {
   setLoadingState(true);
   setSimulationStatus("Loading scenarios...", "loading");
   try {
     const payload = await fetchJson("/api/scenarios");
-    scenarioSelect.innerHTML = "";
-    Object.entries(payload.scenarios).forEach(([key, description]) => {
-      const option = document.createElement("option");
-      option.value = key;
-      option.textContent = scenarioLabel(key);
-      option.title = description;
-      scenarioSelect.appendChild(option);
-    });
-    await loadSimulation("baseline");
+    populateSelect(mapSelect, payload.maps || {});
+    populateSelect(scenarioSelect, payload.scenarios || {});
+    mapSelect.value = "one_entrance_one_exit";
+    scenarioSelect.value = "baseline";
+    await loadSimulation();
   } catch (error) {
     console.error("Failed to load scenarios", error);
     setSimulationStatus("Could not load scenarios. Check the local server and retry.", "error");
@@ -598,8 +609,12 @@ async function loadScenarios() {
   }
 }
 
-scenarioSelect.addEventListener("change", async (event) => {
-  await loadSimulation(event.target.value);
+scenarioSelect.addEventListener("change", async () => {
+  await loadSimulation();
+});
+
+mapSelect.addEventListener("change", async () => {
+  await loadSimulation();
 });
 
 playPauseButton.addEventListener("click", () => {
@@ -623,14 +638,14 @@ const applyParamsButton = document.getElementById("applyParamsButton");
 const resetParamsButton = document.getElementById("resetParamsButton");
 if (applyParamsButton) {
   applyParamsButton.addEventListener("click", async () => {
-    await loadSimulation(scenarioSelect.value);
+    await loadSimulation();
   });
 }
 if (resetParamsButton) {
   resetParamsButton.addEventListener("click", async () => {
-    ["inputCars", "inputSlots", "inputEntryGates", "inputExitGates", "inputEntryService", "inputExitService"]
+    ["inputCars", "inputSlots", "inputEntryService", "inputExitService"]
       .forEach((id) => { const el = document.getElementById(id); if (el) el.value = ""; });
-    await loadSimulation(scenarioSelect.value);
+    await loadSimulation();
   });
 }
 

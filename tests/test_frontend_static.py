@@ -10,13 +10,14 @@ class FrontendStaticTests(unittest.TestCase):
         html = (self.static_dir / "index.html").read_text()
 
         self.assertIn("scenarioSelect", html)
+        self.assertIn("mapSelect", html)
         self.assertIn("playPauseButton", html)
         self.assertIn("replayButton", html)
         self.assertIn("parkingStage", html)
         self.assertIn("slotLayer", html)
         self.assertIn("carLayer", html)
         self.assertIn('/static/style.css?v=25', html)
-        self.assertIn('/static/app.js?v=23', html)
+        self.assertIn('/static/app.js?v=24', html)
         self.assertIn("metricMotorcycles", html)
         self.assertIn("Vehicle Mix", html)
         self.assertIn("simulationStatus", html)
@@ -35,8 +36,10 @@ class FrontendStaticTests(unittest.TestCase):
         # Live custom-input controls.
         self.assertIn("Custom Inputs", html)
         self.assertIn("inputCars", html)
-        self.assertIn("inputEntryGates", html)
-        self.assertIn("inputExitGates", html)
+        self.assertIn("inputSlots", html)
+        # Gate counts come from the map now, not from custom inputs.
+        self.assertNotIn("inputEntryGates", html)
+        self.assertNotIn("inputExitGates", html)
         self.assertIn("applyParamsButton", html)
         self.assertIn("resetParamsButton", html)
 
@@ -108,15 +111,17 @@ class FrontendStaticTests(unittest.TestCase):
         js = (self.static_dir / "app.js").read_text()
 
         self.assertIn("customParamQuery", js)
-        self.assertIn("entry_gates", js)
         self.assertIn("total_cars", js)
+        # Gates are set by the map; the gate overrides are no longer sent.
+        self.assertNotIn("entry_gates", js)
+        self.assertNotIn("exit_gates", js)
         self.assertIn("applyParamsButton", js)
 
     def test_frontend_switches_background_per_gate_layout(self) -> None:
         js = (self.static_dir / "app.js").read_text()
 
-        self.assertIn("SCENARIO_BACKGROUNDS", js)
-        self.assertIn("applyScenarioBackground", js)
+        self.assertIn("MAP_BACKGROUNDS", js)
+        self.assertIn("applyMap", js)
         self.assertIn("two_entrance_two_exit", js)
         self.assertIn("custom-map", js)
 
@@ -124,7 +129,7 @@ class FrontendStaticTests(unittest.TestCase):
         js = (self.static_dir / "app.js").read_text()
         css = (self.static_dir / "style.css").read_text()
 
-        self.assertIn("SCENARIO_GATES", js)
+        self.assertIn("MAP_GATES", js)
         self.assertIn("buildCustomGates", js)
         self.assertIn("map-gate", js)
         self.assertIn(".map-gate", css)

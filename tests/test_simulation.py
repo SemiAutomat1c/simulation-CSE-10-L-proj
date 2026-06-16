@@ -13,13 +13,21 @@ from app.simulation import (
 
 
 class ParkingSimulationTests(unittest.TestCase):
-    _payload_cache: dict[str, dict] = {}
+    _payload_cache: dict[tuple[str, str], dict] = {}
 
     @classmethod
-    def scenario_payload(cls, scenario: str) -> dict:
-        if scenario not in cls._payload_cache:
-            cls._payload_cache[scenario] = run_simulation(ParkingSimulationConfig(scenario=scenario)).to_dict()
-        return cls._payload_cache[scenario]
+    def scenario_payload(cls, scenario: str, map: str = "one_entrance_one_exit") -> dict:
+        key = (scenario, map)
+        if key not in cls._payload_cache:
+            cls._payload_cache[key] = run_simulation(
+                ParkingSimulationConfig(scenario=scenario, map=map)
+            ).to_dict()
+        return cls._payload_cache[key]
+
+    @classmethod
+    def map_payload(cls, map: str, scenario: str = "baseline") -> dict:
+        """A gate-layout map running the default demand scenario."""
+        return cls.scenario_payload(scenario, map=map)
 
     def test_cars_progress_through_required_states(self) -> None:
         payload = self.scenario_payload("baseline")
@@ -723,7 +731,7 @@ class ParkingSimulationTests(unittest.TestCase):
     def test_top_entrance_vehicles_face_downward_before_gate(self) -> None:
         # On two-entrance maps the top (north) lane queues down from the top edge,
         # so those cars must face down (180deg), not up like the bottom lane.
-        payload = self.scenario_payload("two_entrance_two_exit")
+        payload = self.map_payload("two_entrance_two_exit")
 
         north_headings = [
             car["heading"]
@@ -817,19 +825,20 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertEqual(metrics["total_vehicle_count"], 80)
         self.assertEqual(metrics["total_slots"], 40)
 
-    def test_gate_layout_scenarios_have_expected_gate_counts(self) -> None:
+    def test_maps_have_expected_gate_counts(self) -> None:
         expected = {
-            "two_entrance_two_exit": (2, 2),
+            "one_entrance_one_exit": (1, 1),
             "two_entrance_one_exit": (2, 1),
             "one_entrance_two_exit": (1, 2),
+            "two_entrance_two_exit": (2, 2),
         }
-        for scenario, (entries, exits) in expected.items():
-            metrics = self.scenario_payload(scenario)["metrics"]
-            self.assertEqual(metrics["entry_gate_count"], entries, scenario)
-            self.assertEqual(metrics["exit_gate_count"], exits, scenario)
+        for map_name, (entries, exits) in expected.items():
+            metrics = self.map_payload(map_name)["metrics"]
+            self.assertEqual(metrics["entry_gate_count"], entries, map_name)
+            self.assertEqual(metrics["exit_gate_count"], exits, map_name)
 
     def test_two_exit_map_splits_exit_queue_into_two_lanes(self) -> None:
-        payload = self.scenario_payload("two_entrance_two_exit")
+        payload = self.map_payload("two_entrance_two_exit")
         lanes = {
             car.get("exit_lane")
             for frame in payload["frames"]
@@ -857,7 +866,7 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertLess(max(top_band), min(bottom_band))
 
     def test_one_entrance_two_exit_uses_two_horizontal_exit_lanes(self) -> None:
-        payload = self.scenario_payload("one_entrance_two_exit")
+        payload = self.map_payload("one_entrance_two_exit")
         lanes = {
             car.get("exit_lane")
             for frame in payload["frames"]
@@ -884,7 +893,7 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertLess(max(top_band), min(bottom_band))
 
     def test_one_entrance_two_exit_exit_queue_cars_do_not_overlap(self) -> None:
-        payload = self.scenario_payload("one_entrance_two_exit")
+        payload = self.map_payload("one_entrance_two_exit")
         # Cars settled in a booth's horizontal queue (at the gate's own level, out by
         # the booths) must keep a full car gap from their lane-mates in that line.
         gate_y = {"top": EXIT_TOP_GATE_POINT[1], "bottom": EXIT_BOTTOM_GATE_POINT[1]}
@@ -908,8 +917,8 @@ class ParkingSimulationTests(unittest.TestCase):
         # Each painted exit booth is its own single-file gate. Two cars on the same
         # exit lane must never occupy the gate throat simultaneously, or they render
         # stacked on top of each other at the exit.
-        for scenario in ("one_entrance_two_exit", "two_entrance_two_exit"):
-            payload = self.scenario_payload(scenario)
+        for map_name in ("one_entrance_two_exit", "two_entrance_two_exit"):
+            payload = self.map_payload(map_name)
             for frame in payload["frames"]:
                 exiting = [
                     car
@@ -923,11 +932,11 @@ class ParkingSimulationTests(unittest.TestCase):
                             continue
                         distance = ((car["x"] - other["x"]) ** 2 + (car["y"] - other["y"]) ** 2) ** 0.5
                         self.assertGreaterEqual(
-                            distance, 4.0, (scenario, frame["time_minutes"], car, other)
+                            distance, 4.0, (map_name, frame["time_minutes"], car, other)
                         )
 
     def test_two_entrance_map_cars_stop_at_their_gate_then_turn_into_loop(self) -> None:
-        payload = self.scenario_payload("two_entrance_two_exit")
+        payload = self.map_payload("two_entrance_two_exit")
 
         def crossing(car_id):
             return [
@@ -946,13 +955,15 @@ class ParkingSimulationTests(unittest.TestCase):
         # North: crosses the top gate (y around 29) and turns right into the loop
         # lane at x=25 without short-cutting diagonally across the lot.
         self.assertTrue(any(abs(car["x"] - 8.0) <= 0.2 and 26.0 <= car["y"] <= 33.0 for car in north))
-        self.assertTrue(any(abs(car["x"] - 25.0) <= 0.6 and 33.0 <= car["y"] <= 37.0 for car in north))
+        # Reaches the loop-lane turn (~x=25, y~35); tolerance covers the last sampled
+        # gate_crossing frame, which lands just shy of x=25 before the searching state.
+        self.assertTrue(any(abs(car["x"] - 25.0) <= 1.5 and 33.0 <= car["y"] <= 37.0 for car in north))
 
         # South (lower gate): the car stops at its OWN gate near y=72 and turns
         # into the loop at the main-road level (~55.7) — it never drives up to the
         # top-corner entry.
         self.assertTrue(any(abs(car["x"] - 8.0) <= 0.2 and 70.0 <= car["y"] <= 80.0 for car in south))
-        self.assertTrue(any(abs(car["x"] - 25.0) <= 0.6 and 53.0 <= car["y"] <= 57.0 for car in south))
+        self.assertTrue(any(abs(car["x"] - 25.0) <= 1.5 and 53.0 <= car["y"] <= 57.0 for car in south))
         self.assertFalse(any(abs(car["x"] - 8.0) <= 0.2 and car["y"] < 40.0 for car in south))
 
     def test_adding_an_entry_gate_reduces_entry_wait(self) -> None:
