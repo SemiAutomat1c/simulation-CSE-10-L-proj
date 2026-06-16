@@ -115,8 +115,9 @@ function clampPercent(value) {
 
 function usesCustomCoordinateGrid(x, y) {
   if (!document.body.classList.contains("custom-map")) return false;
-  return x >= 24 && x <= 90 && y >= 12 && y <= 82;
+  return x >= 24;
 }
+
 
 function rowFromSlotId(slotId) {
   const match = /^P(\d+)$/.exec(slotId || "");
@@ -149,8 +150,8 @@ function mapScenePoint(x, y, options = {}) {
   }
   const transform = CUSTOM_MAP_TRANSFORMS[activeMap] || CUSTOM_MAP_COORDINATE_TRANSFORM;
   const rowOffset = rowSceneOffset(transform, y, options.row);
-  const transformedX = clampPercent(x * transform.xScale + transform.xOffset);
-  const transformedY = clampPercent(y * transform.yScale + transform.yOffset + rowOffset);
+  const transformedX = x * transform.xScale + transform.xOffset;
+  const transformedY = y * transform.yScale + transform.yOffset + rowOffset;
   return { x: transformedX, y: transformedY };
 }
 
