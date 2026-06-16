@@ -554,6 +554,24 @@ function customParamQuery() {
   return query;
 }
 
+// Show the value each blank ("auto") input resolves to for the current scenario,
+// e.g. placeholder "auto (72)" — so it's clear what leaving it blank will use.
+function updateInputPlaceholders(defaults) {
+  if (!defaults) return;
+  const hints = [
+    ["inputCars", defaults.total_cars],
+    ["inputSlots", defaults.slot_count],
+    ["inputEntryService", defaults.entry_service],
+    ["inputExitService", defaults.exit_service],
+  ];
+  for (const [id, value] of hints) {
+    const el = document.getElementById(id);
+    if (el && value !== undefined && value !== null) {
+      el.placeholder = `auto (${value})`;
+    }
+  }
+}
+
 async function loadSimulation() {
   const scenario = scenarioSelect.value || "baseline";
   const map = mapSelect.value || "one_entrance_one_exit";
@@ -565,6 +583,7 @@ async function loadSimulation() {
       `/api/simulation?map=${encodeURIComponent(map)}&scenario=${encodeURIComponent(scenario)}${customParamQuery()}&t=${Date.now()}`
     );
     simulationData = nextSimulationData;
+    updateInputPlaceholders(simulationData.defaults);
     carLayer.innerHTML = "";
     carNodes = new Map();
     previousVehiclePoints = new Map();

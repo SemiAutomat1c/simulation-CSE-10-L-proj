@@ -17,7 +17,7 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("slotLayer", html)
         self.assertIn("carLayer", html)
         self.assertIn('/static/style.css?v=25', html)
-        self.assertIn('/static/app.js?v=24', html)
+        self.assertIn('/static/app.js?v=25', html)
         self.assertIn("metricMotorcycles", html)
         self.assertIn("Vehicle Mix", html)
         self.assertIn("simulationStatus", html)

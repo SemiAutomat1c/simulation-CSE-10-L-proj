@@ -825,6 +825,26 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertEqual(metrics["total_vehicle_count"], 80)
         self.assertEqual(metrics["total_slots"], 40)
 
+    def test_slot_override_closes_surplus_slots_keeps_full_lot(self) -> None:
+        # Overriding Slots reduces the *usable* count but keeps the whole lot drawn,
+        # with the surplus rendered as closed/unavailable (like limited_slots).
+        payload = run_simulation(
+            ParkingSimulationConfig(scenario="baseline", slot_count=20)
+        ).to_dict()
+        self.assertEqual(payload["metrics"]["visible_slot_count"], 72)
+        self.assertEqual(payload["metrics"]["total_slots"], 20)
+        unavailable = sum(1 for s in payload["frames"][0]["slots"] if s["state"] == "unavailable")
+        self.assertEqual(unavailable, 52)
+
+    def test_result_exposes_scenario_auto_defaults(self) -> None:
+        # Blank ("auto") inputs resolve to these; the UI shows them as hints.
+        defaults = run_simulation(ParkingSimulationConfig(scenario="baseline")).to_dict()["defaults"]
+        self.assertEqual(defaults["slot_count"], 72)
+        for key in ("total_cars", "entry_service", "exit_service"):
+            self.assertIn(key, defaults)
+        limited = run_simulation(ParkingSimulationConfig(scenario="limited_slots")).to_dict()["defaults"]
+        self.assertEqual(limited["slot_count"], 16)
+
     def test_maps_have_expected_gate_counts(self) -> None:
         expected = {
             "one_entrance_one_exit": (1, 1),

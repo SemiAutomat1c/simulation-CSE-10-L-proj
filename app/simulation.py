@@ -70,6 +70,7 @@ class ParkingSimulationResult:
         frames: list[dict],
         metrics: dict,
         snapshot_interval_minutes: float,
+        defaults: dict | None = None,
     ) -> None:
         self.scenario = scenario
         self.slots = slots
@@ -77,10 +78,13 @@ class ParkingSimulationResult:
         self.frames = frames
         self.metrics = metrics
         self.snapshot_interval_minutes = snapshot_interval_minutes
+        # The values "auto" resolves to for this scenario (shown as input hints).
+        self.defaults = defaults or {}
 
     def to_dict(self) -> dict:
         return {
             "scenario": self.scenario,
+            "defaults": self.defaults,
             "timeline": {
                 "snapshot_interval_minutes": self.snapshot_interval_minutes,
                 "end_minute": self.frames[-1]["time_minutes"] if self.frames else 0,
@@ -255,8 +259,8 @@ def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
     if config.total_cars is not None:
         profile["total_cars"] = config.total_cars
     if config.slot_count is not None:
-        profile["slot_count"] = config.slot_count
-        profile["visible_slot_count"] = config.slot_count
+        # Keep the whole lot drawn; the override just CLOSES the surplus slots
+        # (like the limited_slots scenario) instead of shrinking the map.
         profile["usable_slot_count"] = config.slot_count
     if config.entry_service is not None:
         profile["entry_service"] = config.entry_service
@@ -393,6 +397,13 @@ def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
     env.run()
     frames = _build_frames(slots, cars, config.snapshot_interval_minutes, usable_slot_ids)
     metrics = _build_metrics(slots, cars, frames, usable_slot_ids, entry_capacity, exit_capacity)
+    # What "auto" (a blank custom input) resolves to for this scenario.
+    defaults = {
+        "total_cars": base_profile["total_cars"],
+        "slot_count": base_profile.get("usable_slot_count", base_profile["slot_count"]),
+        "entry_service": base_profile["entry_service"],
+        "exit_service": base_profile["exit_service"],
+    }
     return ParkingSimulationResult(
         scenario=scenario,
         slots=slots,
@@ -400,6 +411,7 @@ def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
         frames=frames,
         metrics=metrics,
         snapshot_interval_minutes=config.snapshot_interval_minutes,
+        defaults=defaults,
     )
 
 
