@@ -981,22 +981,22 @@ def _search_start_point(slot: ParkingSlot | None) -> tuple[float, float]:
 
 def _gate_crossing_path(slot: ParkingSlot | None = None, car: CarRecord | None = None) -> list[tuple[float, float]]:
     if car is not None and car.entrance == "north":
-        # Cross the north gate, drop to the upper drive lane, then turn right into
-        # the central search loop (no diagonal short-cut across the lot).
+        # Cross the north gate then angle diagonally into the lot so the car clears
+        # the entry column (x=8) immediately — prevents it appearing in the middle
+        # zone between the two gates on two-entrance maps.
         return [
             _entry_stop_point(car),
             (ENTRY_LANE_X, NORTH_ENTRY_GATE_Y),
-            (ENTRY_LANE_X, ROW_A_DRIVE_Y),
             (ENTRY_TURN_X, ROW_A_DRIVE_Y),
             _search_start_point(slot),
         ]
     if car is not None and _is_lower_entrance(car):
-        # Cross the lower gate, rise to the main drive lane, then turn right into
-        # the central search loop.
+        # Cross the lower gate then angle diagonally up-right into the lot so the
+        # car clears the entry column immediately rather than riding x=8 upward
+        # through the zone between the two gates.
         return [
             _entry_stop_point(car),
             (ENTRY_LANE_X, SOUTH_LOW_GATE_Y),
-            (ENTRY_LANE_X, MAIN_ROAD_Y),
             (ENTRY_TURN_X, MAIN_ROAD_Y),
             _search_start_point(slot),
         ]
