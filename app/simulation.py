@@ -574,13 +574,25 @@ def _build_frames(
 def _apply_vehicle_spacing(car_payload: list[dict]) -> None:
     moving_states = {"entry_queue", "approaching_gate", "gate_wait", "gate_crossing", "searching", "exiting", "denied"}
 
-    # Full entry lane (queue → approaching → gate_wait → gate_crossing): the car
-    # closest to the gate (lowest y) is the leader. Followers are pushed further
-    # from the gate (higher y). Covers the full vertical extent including the
-    # off-screen queue below the map (no y-bound filter).
+    # North entry lane (two-entrance maps): cars approach from the top edge and
+    # queue above the north gate. Leader = closest to gate (highest y), followers
+    # are pushed upward (direction=+1) so they never cascade past the gate.
     _enforce_lane_spacing(
         car_payload,
-        lambda car: car["state"] in {"entry_queue", "approaching_gate", "gate_wait", "gate_crossing"} and abs(car["x"] - ENTRY_LANE_X) <= 0.35,
+        lambda car: car.get("entrance") == "north"
+            and car["state"] in {"entry_queue", "approaching_gate", "gate_wait", "gate_crossing"}
+            and abs(car["x"] - ENTRY_LANE_X) <= 0.35,
+        axis="y",
+        direction=1,
+        minimum_gap=ENTRY_LANE_MIN_GAP,
+    )
+    # South / baseline entry lane: cars approach from the bottom edge. Leader =
+    # closest to gate (lowest y on the southern approach), followers pushed down.
+    _enforce_lane_spacing(
+        car_payload,
+        lambda car: car.get("entrance") != "north"
+            and car["state"] in {"entry_queue", "approaching_gate", "gate_wait", "gate_crossing"}
+            and abs(car["x"] - ENTRY_LANE_X) <= 0.35,
         axis="y",
         direction=-1,
         minimum_gap=ENTRY_LANE_MIN_GAP,
@@ -754,6 +766,7 @@ def _car_to_frame(car: CarRecord, cars: list[CarRecord], slots: list[ParkingSlot
         "x": round(x, 2),
         "y": round(y, 2),
         "exit_lane": car.exit_lane,
+        "entrance": car.entrance,
     }
 
 
