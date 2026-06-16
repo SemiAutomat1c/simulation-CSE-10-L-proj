@@ -817,11 +817,11 @@ def _car_heading(car: CarRecord, cars: list[CarRecord], slots: list[ParkingSlot]
         return None
 
     exit_phase = _exit_phase(car, time_minutes) if state == "exiting" else None
-    if state == "exiting" and exit_phase == "wait":
-        return 90.0
-
-    if state == "exiting" and car.exit_layout == "horizontal_split" and exit_phase == "merge":
-        return 90.0
+    if state == "exiting":
+        if car.exit_layout == "horizontal_split" and exit_phase in {"approach", "wait", "merge"}:
+            return 90.0
+        if exit_phase == "wait":
+            return 90.0
 
     if state == "exit_queue" and car.exit_layout == "horizontal_split":
         # Two-exit horizontal queue: once a car is on its booth lane Y level, it faces right toward the gate.

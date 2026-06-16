@@ -958,7 +958,7 @@ class ParkingSimulationTests(unittest.TestCase):
                 for frame in payload["frames"]
                 for car in frame["cars"]
                 if car["state"] == "exiting"
-                and car.get("exit_phase") == "wait"
+                and car.get("exit_phase") in {"approach", "wait"}
                 and car.get("exit_lane") in {"top", "bottom"}
             ]
 
