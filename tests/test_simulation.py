@@ -933,6 +933,71 @@ class ParkingSimulationTests(unittest.TestCase):
                         minimum_gap = 2.6 if "motorcycle" in {car["vehicle_type"], other["vehicle_type"]} else 4.2
                         self.assertGreaterEqual(distance, minimum_gap, (frame["time_minutes"], car, other))
 
+    def test_two_exit_queue_cars_stay_horizontal_while_joining_right_side_queue(self) -> None:
+        for map_name in ("one_entrance_two_exit", "two_entrance_two_exit"):
+            payload = self.map_payload(map_name, scenario="exit_congestion")
+            bad_queue_cars = [
+                (frame["time_minutes"], car)
+                for frame in payload["frames"]
+                for car in frame["cars"]
+                if car["state"] == "exit_queue"
+                and car.get("exit_layout") == "horizontal_split"
+                and car.get("queue_arrived")
+                and abs((car["heading"] or 0.0) - 90.0) > 1.0
+            ]
+
+            self.assertEqual(bad_queue_cars, [], map_name)
+
+    def test_two_exit_booth_wait_cars_hold_horizontal_gate_pose(self) -> None:
+        gate_points = {"top": EXIT_TOP_GATE_POINT, "bottom": EXIT_BOTTOM_GATE_POINT}
+
+        for map_name in ("one_entrance_two_exit", "two_entrance_two_exit"):
+            payload = self.map_payload(map_name)
+            wait_cars = [
+                car
+                for frame in payload["frames"]
+                for car in frame["cars"]
+                if car["state"] == "exiting"
+                and car.get("exit_phase") == "wait"
+                and car.get("exit_lane") in {"top", "bottom"}
+            ]
+
+            self.assertTrue(wait_cars, map_name)
+            for car in wait_cars:
+                expected_x, expected_y = gate_points[car["exit_lane"]]
+                self.assertAlmostEqual(car["x"], expected_x, delta=0.01)
+                self.assertAlmostEqual(car["y"], expected_y, delta=0.01)
+                self.assertAlmostEqual(car["heading"], 90.0, delta=1.0)
+
+    def test_two_exit_gate_merge_moves_right_before_outside_road_turn(self) -> None:
+        gate_y = {"top": EXIT_TOP_GATE_POINT[1], "bottom": EXIT_BOTTOM_GATE_POINT[1]}
+
+        for map_name in ("one_entrance_two_exit", "two_entrance_two_exit"):
+            payload = self.map_payload(map_name)
+            for lane in ("top", "bottom"):
+                merge_frames = [
+                    car
+                    for frame in payload["frames"]
+                    for car in frame["cars"]
+                    if car["state"] == "exiting"
+                    and car.get("exit_phase") == "merge"
+                    and car.get("exit_lane") == lane
+                ]
+
+                self.assertTrue(merge_frames, (map_name, lane))
+                by_car: dict[int, list[dict]] = {}
+                for car in merge_frames:
+                    by_car.setdefault(car["id"], []).append(car)
+
+                for car_frames in by_car.values():
+                    previous_x = None
+                    for car in car_frames:
+                        self.assertAlmostEqual(car["y"], gate_y[lane], delta=0.01)
+                        self.assertAlmostEqual(car["heading"], 90.0, delta=1.0)
+                        if previous_x is not None:
+                            self.assertGreaterEqual(car["x"], previous_x - 0.01)
+                        previous_x = car["x"]
+
     def test_two_exit_gates_serve_one_car_per_lane_at_a_time(self) -> None:
         # Each painted exit booth is its own single-file gate. Two cars on the same
         # exit lane must never occupy the gate throat simultaneously, or they render

@@ -143,6 +143,14 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn('"merge"', js)
         self.assertIn('"road"', js)
 
+    def test_frontend_skips_two_exit_queue_corner_interpolation(self) -> None:
+        js = (self.static_dir / "app.js").read_text()
+
+        self.assertIn('car.state === "exit_queue"', js)
+        self.assertIn('car.exit_layout === "horizontal_split"', js)
+        self.assertIn("Math.abs(nextCar.x - car.x) > 0.01", js)
+        self.assertIn("Math.abs(nextCar.y - car.y) > 0.01", js)
+
     def test_entry_gate_opens_away_from_entry_queue(self) -> None:
         css = (self.static_dir / "style.css").read_text()
 

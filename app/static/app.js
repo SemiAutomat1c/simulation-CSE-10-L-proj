@@ -273,6 +273,14 @@ function interpolatePosition(x1, y1, x2, y2, t) {
 
 function shouldInterpolatePosition(car, nextCar) {
   if (!nextCar || car.state !== nextCar.state) return false;
+  if (
+    car.state === "exit_queue"
+    && car.exit_layout === "horizontal_split"
+    && Math.abs(nextCar.x - car.x) > 0.01
+    && Math.abs(nextCar.y - car.y) > 0.01
+  ) {
+    return false;
+  }
   if (car.state !== "exiting") return true;
 
   // Respect the backend's lane-following exit path through the gate area.

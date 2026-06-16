@@ -774,6 +774,11 @@ def _car_to_frame(car: CarRecord, cars: list[CarRecord], slots: list[ParkingSlot
     state = _car_state(car, time_minutes)
     exit_phase = _exit_phase(car, time_minutes) if state == "exiting" else None
     x, y = _car_position(car, cars, slots, time_minutes, state)
+    queue_arrival = min(
+        car.exit_start or car.done_time or time_minutes,
+        (car.exit_request or time_minutes) + EXIT_QUEUE_APPROACH_MINUTES,
+    )
+    queue_arrived = (state == "exit_queue" and time_minutes >= queue_arrival)
     return {
         "id": car.id,
         "vehicle_type": car.vehicle_type,
@@ -786,6 +791,7 @@ def _car_to_frame(car: CarRecord, cars: list[CarRecord], slots: list[ParkingSlot
         "exit_lane": car.exit_lane,
         "exit_layout": car.exit_layout,
         "entrance": car.entrance,
+        "queue_arrived": queue_arrived,
     }
 
 
@@ -794,6 +800,14 @@ def _car_heading(car: CarRecord, cars: list[CarRecord], slots: list[ParkingSlot]
     if slot is not None and state == "parked":
         return slot.angle
 
+    if state == "exit_queue":
+        queue_arrival = min(
+            car.exit_start or car.done_time or time_minutes,
+            (car.exit_request or time_minutes) + EXIT_QUEUE_APPROACH_MINUTES,
+        )
+        if time_minutes >= queue_arrival:
+            if car.exit_layout == "horizontal_split":
+                return 90.0
     if state in {"entry_queue", "gate_wait"}:
         # Bottom entrances queue upward (face up, 0deg); the top/north entrance
         # queues downward from the top edge, so those cars face down (180deg).
@@ -802,14 +816,18 @@ def _car_heading(car: CarRecord, cars: list[CarRecord], slots: list[ParkingSlot]
     if state not in {"approaching_gate", "gate_crossing", "searching", "exit_queue", "exiting", "denied"}:
         return None
 
-    if state == "exiting" and _exit_phase(car, time_minutes) == "wait":
+    exit_phase = _exit_phase(car, time_minutes) if state == "exiting" else None
+    if state == "exiting" and exit_phase == "wait":
         return 90.0
 
-    if state == "exit_queue" and car.exit_lane in ("top", "bottom"):
-        # Two-exit horizontal queue: once a car is in the booth lane it faces right
-        # toward the gate, instead of pointing the way it merged up from the main
-        # road (which left waiting cars rotated vertically).
-        if _car_position(car, cars, slots, time_minutes, state)[0] >= 60.0:
+    if state == "exiting" and car.exit_layout == "horizontal_split" and exit_phase == "merge":
+        return 90.0
+
+    if state == "exit_queue" and car.exit_layout == "horizontal_split":
+        # Two-exit horizontal queue: once a car is on its booth lane Y level, it faces right toward the gate.
+        pos = _car_position(car, cars, slots, time_minutes, state)
+        gate_y = EXIT_TOP_GATE_POINT[1] if car.exit_lane == "top" else EXIT_BOTTOM_GATE_POINT[1]
+        if abs(pos[1] - gate_y) <= 0.1:
             return 90.0
 
     t_start = None
@@ -846,6 +864,8 @@ def _car_heading(car: CarRecord, cars: list[CarRecord], slots: list[ParkingSlot]
 
     if abs(dx) + abs(dy) < 1e-5:
         if state == "exit_queue":
+            if car.exit_layout == "horizontal_split":
+                return 90.0
             # Vertical column faces the gate (up). Wrapped rows face the way they
             # advance, which alternates per snake row (right, then left, ...).
             pos = _car_position(car, cars, slots, time_minutes, state)
@@ -1262,11 +1282,17 @@ def _slot_to_exit_queue_path(
     Right-edge connector lanes (x=85 from the top rows, x=77.5 from the bottom
     row) are reused to reach the main road; see _apply_vehicle_spacing.
     """
-    # Two-exit maps: run along the main road to the tail's column, then step into
-    # the tail of the horizontal top/bottom queue (joining from the side).
+    # Two-exit maps: join from behind the horizontal queue, then finish by
+    # moving right into the queue slot so cars do not rotate vertically at the
+    # back of the line.
     if car is not None and car.exit_lane in ("top", "bottom"):
-        tx, _ = queue_target
-        merge = [(tx, MAIN_ROAD_Y), queue_target]
+        tx, ty = queue_target
+        join_x = max(EXIT_TWO_LANE_MIN_X, min(54.0, tx - EXIT_HORIZ_QUEUE_SPACING))
+        merge = [
+            (join_x, MAIN_ROAD_Y),
+            (join_x, ty),
+            queue_target,
+        ]
     else:
         merge = _exit_queue_merge_path(queue_target)
     # Denied vehicles are already coasting along the main road toward the column.
