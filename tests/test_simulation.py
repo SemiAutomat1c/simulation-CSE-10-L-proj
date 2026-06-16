@@ -1,9 +1,11 @@
 import unittest
 
 from app.simulation import (
+    EXIT_BOTTOM_GATE_POINT,
     EXIT_GATE_ROAD_Y,
     EXIT_QUEUE_LANE_X,
     EXIT_STOP_POINT,
+    EXIT_TOP_GATE_POINT,
     EXIT_VERT_QUEUE_SPACING,
     ParkingSimulationConfig,
     run_simulation,
@@ -853,6 +855,76 @@ class ParkingSimulationTests(unittest.TestCase):
         self.assertTrue(top_band)
         self.assertTrue(bottom_band)
         self.assertLess(max(top_band), min(bottom_band))
+
+    def test_one_entrance_two_exit_uses_two_horizontal_exit_lanes(self) -> None:
+        payload = self.scenario_payload("one_entrance_two_exit")
+        lanes = {
+            car.get("exit_lane")
+            for frame in payload["frames"]
+            for car in frame["cars"]
+            if car["state"] == "exit_queue"
+        }
+        # Both booths are used, each as its own queue (not the single middle column).
+        self.assertIn("top", lanes)
+        self.assertIn("bottom", lanes)
+        self.assertNotIn("single", lanes)
+        # Each exit is a HORIZONTAL queue at its own booth level: the top line sits in
+        # an upper band, the bottom line in a lower band, and the two never share a row.
+        def band_ys(lane, lo, hi):
+            return [
+                car["y"]
+                for frame in payload["frames"]
+                for car in frame["cars"]
+                if car["state"] == "exit_queue" and car.get("exit_lane") == lane and lo <= car["y"] <= hi
+            ]
+        top_band = band_ys("top", 25.0, 45.0)
+        bottom_band = band_ys("bottom", 60.0, 80.0)
+        self.assertTrue(top_band)
+        self.assertTrue(bottom_band)
+        self.assertLess(max(top_band), min(bottom_band))
+
+    def test_one_entrance_two_exit_exit_queue_cars_do_not_overlap(self) -> None:
+        payload = self.scenario_payload("one_entrance_two_exit")
+        # Cars settled in a booth's horizontal queue (at the gate's own level, out by
+        # the booths) must keep a full car gap from their lane-mates in that line.
+        gate_y = {"top": EXIT_TOP_GATE_POINT[1], "bottom": EXIT_BOTTOM_GATE_POINT[1]}
+        for frame in payload["frames"]:
+            for lane in ("top", "bottom"):
+                queued = [
+                    car
+                    for car in frame["cars"]
+                    if car["state"] == "exit_queue"
+                    and car.get("exit_lane") == lane
+                    and abs(car["y"] - gate_y[lane]) <= 1.5
+                    and car["x"] >= 55.0
+                ]
+                for index, car in enumerate(queued):
+                    for other in queued[index + 1:]:
+                        distance = ((car["x"] - other["x"]) ** 2 + (car["y"] - other["y"]) ** 2) ** 0.5
+                        minimum_gap = 2.6 if "motorcycle" in {car["vehicle_type"], other["vehicle_type"]} else 4.2
+                        self.assertGreaterEqual(distance, minimum_gap, (frame["time_minutes"], car, other))
+
+    def test_two_exit_gates_serve_one_car_per_lane_at_a_time(self) -> None:
+        # Each painted exit booth is its own single-file gate. Two cars on the same
+        # exit lane must never occupy the gate throat simultaneously, or they render
+        # stacked on top of each other at the exit.
+        for scenario in ("one_entrance_two_exit", "two_entrance_two_exit"):
+            payload = self.scenario_payload(scenario)
+            for frame in payload["frames"]:
+                exiting = [
+                    car
+                    for car in frame["cars"]
+                    if car["state"] == "exiting"
+                    and car.get("exit_lane") in {"top", "bottom"}
+                ]
+                for index, car in enumerate(exiting):
+                    for other in exiting[index + 1:]:
+                        if car.get("exit_lane") != other.get("exit_lane"):
+                            continue
+                        distance = ((car["x"] - other["x"]) ** 2 + (car["y"] - other["y"]) ** 2) ** 0.5
+                        self.assertGreaterEqual(
+                            distance, 4.0, (scenario, frame["time_minutes"], car, other)
+                        )
 
     def test_two_entrance_map_cars_stop_at_their_gate_then_turn_into_loop(self) -> None:
         payload = self.scenario_payload("two_entrance_two_exit")

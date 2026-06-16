@@ -55,6 +55,7 @@ class CarRecord:
     entrance: str = "south"  # "south" (default lane) or "north" (top lane, 2-entrance maps)
     two_entrance: bool = False  # True on 2-entrance maps; the "south" lane then uses the lower gate
     exit_lane: str = "single"  # "single" (default) or "top"/"bottom" (2-exit maps)
+    exit_layout: str = "single"  # "single" or "horizontal_split" (two-exit maps)
 
 
 class ParkingSimulationResult:
@@ -261,8 +262,12 @@ EXIT_HORIZ_QUEUE_SPACING = 6.4
 # The front car sits just left of the gate throat; the rest stack back (leftward)
 # along that lane into the lot, so the top exit and bottom exit read as two
 # clearly separate lanes instead of overlapping vertical columns on the right.
-EXIT_TOP_GATE_POINT = (87.0, 31.0)      # aligned to the top exit gate throat
-EXIT_BOTTOM_GATE_POINT = (87.0, 65.0)   # aligned to the bottom exit gate throat
+# Calibrated to the painted booth throat: the car waits centred in the booth lane
+# (aligned with the gate-arm overlay at display ~92%/34% and ~92%/69%) rather than
+# up on the driveway to its left. x=90 is the grid edge, rendering at display ~89%
+# so the car's nose sits right at the barrier; y is the booth lane centre.
+EXIT_TOP_GATE_POINT = (90.0, 37.9)      # aligned to the top exit gate throat
+EXIT_BOTTOM_GATE_POINT = (90.0, 71.8)   # aligned to the bottom exit gate throat
 # Where a joining car drops onto the queue lane from the main road before backing
 # into the tail (kept inside the lot so it never crosses the line head-on).
 EXIT_TWO_LANE_MIN_X = 26.0
@@ -313,13 +318,34 @@ def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
             car.entrance = "north" if index % 2 == 0 else "south"
             car.two_entrance = True
     # On maps with two exits, split departures between the top and bottom exit lanes.
+    # Both two-exit maps queue horizontally beside each booth (the two gates sit at
+    # very different heights, so the lines never meet); the vertical EXIT FLOW lanes
+    # are too narrow to hold two columns between the closely-stacked booths.
     if base_profile.get("exit_gates", 1) >= 2:
         for index, car in enumerate(cars):
             car.exit_lane = "top" if index % 2 == 0 else "bottom"
+            car.exit_layout = "horizontal_split"
 
     env = simpy.Environment()
     entry_gate = simpy.Resource(env, capacity=entry_capacity)
-    exit_gate = simpy.Resource(env, capacity=exit_capacity)
+    # On two-exit maps each painted booth is its own single-file gate. Give every
+    # exit lane a dedicated resource so the shared-capacity pool can't grant two
+    # permits to cars on the *same* lane (which renders them stacked at one throat).
+    two_exit_lanes = base_profile.get("exit_gates", 1) >= 2
+    if two_exit_lanes:
+        per_lane_capacity = max(1, exit_capacity // 2)
+        exit_gates = {
+            "top": simpy.Resource(env, capacity=per_lane_capacity),
+            "bottom": simpy.Resource(env, capacity=per_lane_capacity),
+        }
+
+        def exit_gate_for(car: CarRecord) -> simpy.Resource:
+            return exit_gates.get(car.exit_lane, exit_gates["top"])
+    else:
+        single_exit_gate = simpy.Resource(env, capacity=exit_capacity)
+
+        def exit_gate_for(car: CarRecord) -> simpy.Resource:
+            return single_exit_gate
 
     def car_process(car: CarRecord):
         yield env.timeout(car.arrival_time)
@@ -346,7 +372,7 @@ def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
             car.exit_request = env.now
             yield env.timeout(EXIT_QUEUE_APPROACH_MINUTES)
 
-            with exit_gate.request() as request:
+            with exit_gate_for(car).request() as request:
                 yield request
                 car.exit_start = env.now
                 yield env.timeout(EXIT_APPROACH_MINUTES)
@@ -374,7 +400,7 @@ def run_simulation(config: ParkingSimulationConfig) -> ParkingSimulationResult:
         _release_slot(car, slots, free_car_slots, free_motorcycle_slots)
         yield env.timeout(EXIT_QUEUE_APPROACH_MINUTES)
 
-        with exit_gate.request() as request:
+        with exit_gate_for(car).request() as request:
             yield request
             car.exit_start = env.now
             yield env.timeout(EXIT_APPROACH_MINUTES)
@@ -665,14 +691,20 @@ def _apply_vehicle_spacing(car_payload: list[dict]) -> None:
     # car sits at the gate (highest x) and the rest stack back leftward.
     _enforce_lane_spacing(
         car_payload,
-        lambda car: car["state"] == "exit_queue" and car.get("exit_lane") == "top" and abs(car["y"] - EXIT_TOP_GATE_POINT[1]) <= 1.5,
+        lambda car: car["state"] == "exit_queue"
+            and car.get("exit_layout") == "horizontal_split"
+            and car.get("exit_lane") == "top"
+            and abs(car["y"] - EXIT_TOP_GATE_POINT[1]) <= 1.5,
         axis="x",
         direction=1,
         minimum_gap=EXIT_HORIZ_QUEUE_SPACING,
     )
     _enforce_lane_spacing(
         car_payload,
-        lambda car: car["state"] == "exit_queue" and car.get("exit_lane") == "bottom" and abs(car["y"] - EXIT_BOTTOM_GATE_POINT[1]) <= 1.5,
+        lambda car: car["state"] == "exit_queue"
+            and car.get("exit_layout") == "horizontal_split"
+            and car.get("exit_lane") == "bottom"
+            and abs(car["y"] - EXIT_BOTTOM_GATE_POINT[1]) <= 1.5,
         axis="x",
         direction=1,
         minimum_gap=EXIT_HORIZ_QUEUE_SPACING,
@@ -766,6 +798,7 @@ def _car_to_frame(car: CarRecord, cars: list[CarRecord], slots: list[ParkingSlot
         "x": round(x, 2),
         "y": round(y, 2),
         "exit_lane": car.exit_lane,
+        "exit_layout": car.exit_layout,
         "entrance": car.entrance,
     }
 
@@ -785,6 +818,13 @@ def _car_heading(car: CarRecord, cars: list[CarRecord], slots: list[ParkingSlot]
 
     if state == "exiting" and _exit_phase(car, time_minutes) == "wait":
         return 90.0
+
+    if state == "exit_queue" and car.exit_lane in ("top", "bottom"):
+        # Two-exit horizontal queue: once a car is in the booth lane it faces right
+        # toward the gate, instead of pointing the way it merged up from the main
+        # road (which left waiting cars rotated vertically).
+        if _car_position(car, cars, slots, time_minutes, state)[0] >= 60.0:
+            return 90.0
 
     t_start = None
     t_end = None
@@ -981,22 +1021,22 @@ def _search_start_point(slot: ParkingSlot | None) -> tuple[float, float]:
 
 def _gate_crossing_path(slot: ParkingSlot | None = None, car: CarRecord | None = None) -> list[tuple[float, float]]:
     if car is not None and car.entrance == "north":
-        # Cross the north gate then angle diagonally into the lot so the car clears
-        # the entry column (x=8) immediately — prevents it appearing in the middle
-        # zone between the two gates on two-entrance maps.
+        # Drive forward (down) through the north gate to the row-A drive lane, THEN
+        # turn right into the lot — a clean L, not a diagonal slide across the gate.
         return [
             _entry_stop_point(car),
             (ENTRY_LANE_X, NORTH_ENTRY_GATE_Y),
+            (ENTRY_LANE_X, ROW_A_DRIVE_Y),
             (ENTRY_TURN_X, ROW_A_DRIVE_Y),
             _search_start_point(slot),
         ]
     if car is not None and _is_lower_entrance(car):
-        # Cross the lower gate then angle diagonally up-right into the lot so the
-        # car clears the entry column immediately rather than riding x=8 upward
-        # through the zone between the two gates.
+        # Drive forward (up) through the lower gate to the main drive lane, THEN turn
+        # right into the lot — a clean L, not a diagonal slide across the gate.
         return [
             _entry_stop_point(car),
             (ENTRY_LANE_X, SOUTH_LOW_GATE_Y),
+            (ENTRY_LANE_X, MAIN_ROAD_Y),
             (ENTRY_TURN_X, MAIN_ROAD_Y),
             _search_start_point(slot),
         ]
@@ -1181,17 +1221,18 @@ def _exit_queue_target_point(cars: list[CarRecord], current_car: CarRecord, refe
     except ValueError:
         queue_idx = 0
 
-    # While the front car is still pulling out of the head slot toward the gate
-    # (its "approach" phase), hold the rest of the queue back by one slot so the
-    # next car doesn't advance into space the exiting car hasn't vacated yet.
-    # The car doing the exiting must not count itself, or it would start its
-    # approach one slot too far back.
+    # Hold the rest of the queue back by one slot for as long as a car still
+    # occupies the gate throat (from when it starts its exit until it has driven
+    # off onto the exit road). On the horizontal layout the head slot *is* the
+    # gate, so releasing the hold any earlier lets the next car advance on top of
+    # the car still waiting/merging at the gate. The exiting car must not count
+    # itself, or it would start its own approach one slot too far back.
     throat_busy = any(
         car.id != current_car.id
         and car.exit_lane == current_car.exit_lane
         and car.exit_start is not None
         and car.exit_start <= reference_time
-        and (car.exit_wait_start is None or car.exit_wait_start > reference_time)
+        and (car.exit_road_start is None or car.exit_road_start > reference_time)
         for car in cars
     )
     offset = 1 if throat_busy else 0

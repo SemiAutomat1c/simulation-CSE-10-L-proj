@@ -93,10 +93,40 @@ class CustomMapLayoutTests(unittest.TestCase):
         self.assertIn("xOffset: 1.94316", js)
         self.assertIn("yScale: 1.03202", js)
         self.assertIn("yOffset: 2.42282", js)
-        self.assertIn("function mapScenePoint(x, y) {", js)
+        self.assertIn("function mapScenePoint(x, y, options = {}) {", js)
         self.assertIn("return { x: transformedX, y: transformedY };", js)
-        self.assertIn("const slotPoint = mapScenePoint(slot.x, slot.y);", js)
-        self.assertIn("const point = mapScenePoint(interpX, interpY);", js)
+        self.assertIn("const slotPoint = mapScenePoint(slot.x, slot.y, { row: slot.row });", js)
+        self.assertIn("const point = mapScenePoint(interpX, interpY, { row: sceneMappingRow(car) });", js)
+
+    def test_two_entrance_one_exit_uses_its_own_vehicle_grid_transform(self) -> None:
+        js = (self.static_dir / "app.js").read_text()
+
+        self.assertIn("let activeScenario = \"baseline\";", js)
+        self.assertIn("const CUSTOM_MAP_SCENARIO_TRANSFORMS = {", js)
+        self.assertIn("two_entrance_one_exit: {", js)
+        self.assertIn("xScale: 0.99270", js)
+        self.assertIn("xOffset: 0.27096", js)
+        self.assertIn("rowYOffsets: { 1: 2.6, 2: 2.6 },", js)
+        self.assertIn("function rowFromSlotId(slotId) {", js)
+        self.assertIn("const rowOffset = transform.rowYOffsets?.[row] || 0;", js)
+        self.assertIn("activeScenario = scenario;", js)
+        self.assertIn("CUSTOM_MAP_SCENARIO_TRANSFORMS[activeScenario] || CUSTOM_MAP_COORDINATE_TRANSFORM", js)
+
+    def test_parking_row_offset_does_not_shift_exit_queues(self) -> None:
+        js = (self.static_dir / "app.js").read_text()
+
+        self.assertIn("function sceneMappingRow(car) {", js)
+        self.assertIn("if (car.state !== \"parked\" && car.state !== \"searching\") return null;", js)
+        self.assertIn("function parkingRowOffsetApplies(y, row) {", js)
+        self.assertIn("if (!parkingRowOffsetApplies(y, row)) return 0;", js)
+
+    def test_one_entrance_two_exit_uses_painted_vehicle_grid_transform(self) -> None:
+        js = (self.static_dir / "app.js").read_text()
+
+        self.assertIn("one_entrance_two_exit: {", js)
+        self.assertIn("xScale: 0.98514", js)
+        self.assertIn("xOffset: 0.52786", js)
+        self.assertIn("rowYOffsets: { 1: 2.6, 2: 2.6 },", js)
 
     def _scenario_gates(self, js: str, scenario: str) -> list[tuple[str, float, float, float]]:
         match = re.search(rf"{scenario}:\s*\[(.*?)\n  \],", js, re.S)

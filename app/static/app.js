@@ -47,6 +47,7 @@ let compareData = null;
 let frameIndex = 0;
 let lastTick = 0;
 let playing = true;
+let activeScenario = "baseline";
 let slotNodes = new Map();
 let carNodes = new Map();
 let previousVehiclePoints = new Map();
@@ -90,6 +91,23 @@ const CUSTOM_MAP_COORDINATE_TRANSFORM = {
   yOffset: 2.42282,
 };
 
+const CUSTOM_MAP_SCENARIO_TRANSFORMS = {
+  two_entrance_one_exit: {
+    xScale: 0.99270,
+    xOffset: 0.27096,
+    yScale: 1.03202,
+    yOffset: 2.42282,
+    rowYOffsets: { 1: 2.6, 2: 2.6 },
+  },
+  one_entrance_two_exit: {
+    xScale: 0.98514,
+    xOffset: 0.52786,
+    yScale: 1.03202,
+    yOffset: 2.42282,
+    rowYOffsets: { 1: 2.6, 2: 2.6 },
+  },
+};
+
 function clampPercent(value) {
   return Math.max(0, Math.min(100, value));
 }
@@ -99,14 +117,45 @@ function usesCustomCoordinateGrid(x, y) {
   return x >= 24 && x <= 90 && y >= 12 && y <= 82;
 }
 
-function mapScenePoint(x, y) {
+function rowFromSlotId(slotId) {
+  const match = /^P(\d+)$/.exec(slotId || "");
+  if (!match) return null;
+
+  const index = Number(match[1]);
+  if (index >= 1 && index <= 20) return 0;
+  if (index >= 21 && index <= 40) return 1;
+  if (index >= 41 && index <= 60) return 2;
+  if (index >= 61 && index <= 66) return 3;
+  if (index >= 67 && index <= 72) return 4;
+  return null;
+}
+
+function parkingRowOffsetApplies(y, row) {
+  if (row === 1) return y >= 42 && y <= 46;
+  if (row === 2) return y >= 61 && y <= 66;
+  return false;
+}
+
+function rowSceneOffset(transform, y, row) {
+  const rowOffset = transform.rowYOffsets?.[row] || 0;
+  if (!parkingRowOffsetApplies(y, row)) return 0;
+  return rowOffset;
+}
+
+function mapScenePoint(x, y, options = {}) {
   if (!usesCustomCoordinateGrid(x, y)) {
     return { x, y };
   }
-  const transform = CUSTOM_MAP_COORDINATE_TRANSFORM;
+  const transform = CUSTOM_MAP_SCENARIO_TRANSFORMS[activeScenario] || CUSTOM_MAP_COORDINATE_TRANSFORM;
+  const rowOffset = rowSceneOffset(transform, y, options.row);
   const transformedX = clampPercent(x * transform.xScale + transform.xOffset);
-  const transformedY = clampPercent(y * transform.yScale + transform.yOffset);
+  const transformedY = clampPercent(y * transform.yScale + transform.yOffset + rowOffset);
   return { x: transformedX, y: transformedY };
+}
+
+function sceneMappingRow(car) {
+  if (car.state !== "parked" && car.state !== "searching") return null;
+  return rowFromSlotId(car.slot_id);
 }
 
 function scenePoint(entity) {
@@ -124,7 +173,7 @@ function renderSlotLayer(slots) {
     const node = document.createElement("div");
     node.className = slotClass(slot);
     node.title = `${slot.id} ${slot.slot_type}`;
-    const slotPoint = mapScenePoint(slot.x, slot.y);
+    const slotPoint = mapScenePoint(slot.x, slot.y, { row: slot.row });
     node.style.left = `${slotPoint.x}%`;
     node.style.top = `${slotPoint.y}%`;
     node.style.setProperty("--slot-angle", `${slot.angle || 0}deg`);
@@ -274,7 +323,7 @@ function renderFrame(frame, nextFrame, subProgress) {
       }
     }
 
-    const point = mapScenePoint(interpX, interpY);
+    const point = mapScenePoint(interpX, interpY, { row: sceneMappingRow(car) });
     const cssPoint = { left: `${point.x}%`, top: `${point.y}%` };
     node.className = carClass(car);
     node.style.left = cssPoint.left;
@@ -432,6 +481,7 @@ const SCENARIO_BACKGROUNDS = {
 };
 
 function applyScenarioBackground(scenario) {
+  activeScenario = scenario;
   const custom = SCENARIO_BACKGROUNDS[scenario];
   const url = custom || DEFAULT_BACKGROUND;
   document.documentElement.style.setProperty("--map-background", `url("${url}")`);
