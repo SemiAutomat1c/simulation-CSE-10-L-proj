@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CSE 10/L – Parking Simulation: Diagrams</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Times New Roman", Times, serif;
+    font-size: 12pt;
+    color: #000;
+    background: #fff;
+    max-width: 750px;
+    margin: 0 auto;
+    padding: 48px 40px 72px;
+  }
+  h1 {
+    font-size: 14pt;
+    font-weight: bold;
+    text-align: center;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  h2 {
+    font-size: 12pt;
+    font-weight: bold;
+    margin-top: 48px;
+    margin-bottom: 6px;
+    border-bottom: 1px solid #000;
+    padding-bottom: 3px;
+  }
+  .subtitle {
+    font-size: 10pt;
+    text-align: center;
+    margin-bottom: 36px;
+  }
+  .fig-wrap {
+    display: flex;
+    justify-content: center;
+    margin: 20px 0 6px;
+  }
+  .caption {
+    font-size: 9.5pt;
+    font-style: italic;
+    text-align: center;
+    margin-bottom: 12px;
+  }
+  p.note {
+    font-size: 10pt;
+    line-height: 1.55;
+    margin-top: 10px;
+  }
+  p.note b { font-style: normal; }
+
+  /* --- shared SVG styles (set on elements via attributes) --- */
+</style>
+</head>
+<body>
+
+<h1>Mall Parking Flow — Discrete-Event Simulation</h1>
+<p class="subtitle">CSE 10/L – Modeling and Simulation · Diagrams (Requirement Item 4)</p>
+
+<!-- ================================================================ -->
+<h2>Figure 1. Vehicle Lifecycle Process Flowchart</h2>
+
+<div class="fig-wrap">
+<!--
+  Vertical flowchart.
+  Layout (each node centred at cx, cy):
+    A  (230, 36)   rounded-rect  "Arrival: vehicle scheduled"
+    B  (230, 100)  rect          "Join ENTRY QUEUE"
+    C  (230, 164)  diamond       "Entry gate free?"
+       yes → D (230, 228)
+       no  → back to B (left loop)
+    D  (230, 228)  rect          "Approach gate"
+    E  (230, 292)  rect          "Gate wait + entry service"
+    F  (230, 356)  rect          "Reserve a slot"
+    G  (230, 420)  diamond       "Compatible slot free?"
+       no  → DEN (440, 420)
+       yes → H (230, 484)
+    H  (230, 484)  rect          "Cross gate into lot"
+    I  (230, 548)  rect          "SEARCH for slot"
+    J  (230, 612)  rect          "PARKED – dwell while shopping"
+    K  (230, 676)  rect          "Exit requested – release slot"
+    DEN(440, 420)  rect (dashed) "DENIED"
+    L  (230, 740)  rect          "Join EXIT QUEUE"
+    M  (230, 804)  diamond       "Exit gate free?"
+       no  → back to L (right loop)
+       yes → N (230, 868)
+    N  (230, 868)  rect          "Exit service at gate"
+    O  (230, 932)  rect          "Merge to outside road"
+    P  (230, 996)  rounded-rect  "DONE – departed"
+-->
+<svg viewBox="0 0 580 1060" width="430" xmlns="http://www.w3.org/2000/svg"
+     font-family="Times New Roman, Times, serif" font-size="9.5">
+
+  <!-- ARROW MARKER -->
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#000"/>
+    </marker>
+    <marker id="arr-d" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <!-- ---- NODE HELPERS (inline) ---- -->
+
+  <!-- A: start rounded rect -->
+  <rect x="120" y="18" width="220" height="36" rx="18" ry="18"
+        fill="#fff" stroke="#000" stroke-width="1.5"/>
+  <text x="230" y="36" text-anchor="middle" dominant-baseline="middle" font-weight="bold">
+    Arrival: vehicle scheduled
+  </text>
+
+  <!-- A → B -->
+  <line x1="230" y1="54" x2="230" y2="82" stroke="#000" stroke-width="1" marker-end="url(#arr)"/>
+
+  <!-- B: ENTRY QUEUE (double border) -->
+  <rect x="130" y="82" width="200" height="36" fill="#f0f0f0" stroke="#000" stroke-width="1.5"/>
+  <rect x="133" y="85" width="194" height="30" fill="none" stroke="#000" stroke-width="0.7"/>
+  <text x="230" y="100" text-anchor="middle" dominant-baseline="middle" font-weight="bold">
+    Join ENTRY QUEUE
+  </text>
+
+  <!-- B → C -->
+  <line x1="230" y1="118" x2="230" y2="146" stroke="#000" stroke-width="1" marker-end="url(#arr)"/>
+
+  <!-- C: diamond "Entry gate free?" -->
+  <polygon points="230,146 300,174 230,202 160,174"
+           fill="#fff" stroke="#000" stroke-width="1.5"/>
+  <text x="230" y="170" text-anchor="middle" dominant-baseline="middle">Entry gate</text>
+  <text x="230" y="182" text-anchor="middle" dominant-baseline="middle">free?</text>
+
+  <!-- C no → loop left back to B -->
+  <path d="M160,174 L90,174 L90,100 L130,100" fill="none" stroke="#000" stroke-width="1" marker-end="url(#arr)"/>
+  <text x="120" y="168" text-anchor="middle" font-size="8.5" font-style="italic">no</text>
+
+  <!-- C yes → D -->
+  <line x1="230" y1="202" x2="230" y2="210" stroke="#000" stroke-width="1" marker-end="url(#arr)"/>
+  <text x="240" y="208" font-size="8.5" font-style="italic">yes</text>
+
+  <!-- D: Approach gate -->
+  <rect x="130" y="210" width="200" height="36" fill="#fff" stroke="#000" stroke-width="1.5"/>
+  <text x="230" y="228" text-anchor="middle" dominant-baseline="middle">Approach gate</text>
+
+  <!-- D → E -->
+  <line x1="230" y1="246" x2="230" y2="274" stroke="#000" stroke-width="1" marker-end="url(#arr)"/>
+
+  <!-- E: Gate wait (shaded) -->
+  <rect x="130" y="274" width="200" height="36" fill="#e0e0e0" stroke="#000" stroke-width="1.5"/>
+  <text x="230" y="292" text-anchor="middle" dominant-baseline="middle">Gate wait + entry service</text>
+
+  <!-- E → F -->
+  <line x1="230" y1="310" x2="230" y2="338" stroke="#000" stroke-width="1" marker-end="url(#arr)"/>
+
+  <!-- F: Reserve a slot -->
+  <rect x="130" y="338" width="200" height="36" fill="#fff" stroke="#000" stroke-width="1.5"/>
+  <text x="230" y="356" text-anchor="middle" dominant-baseline="middle">Reserve a slot</text>
+
+  <!-- F → G -->
+  <line x1="230" y1="374" x2="230" y2="402" stroke="#000" stroke-width="1" marker-end="url(#arr)"/>
+
+  <!-- G: diamond "Compatible slot free?" -->
+  <polygon points="230,402 310,432 230,462 150,432"
+           fill="#fff" stroke="#000" stroke-width="1.5"/>
+  <text x="230" y="427" text-anchor="middle" dominant-baseline="middle">Compatible</text>
+  <text x="230" y="440" text-anchor="middle" dominant-baseline="middle">slot free?</text>
+
+  <!-- G no → DEN (right) -->
+  <path d="M310,432 L400,432" fill="none" stroke="#000" stroke-width="1" marker-end="url(#arr)"/>
+  <text x="350" y="426" text-anchor="middle" font-size="8.5" font-style="italic">no</text>
+
+  <!-- DEN: dashed box -->
+  <rect x="400" y="414" width="140" height="36" fill="#fff"
+        stroke="#000" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <text x="470" y="432" text-anchor="middle" dominant-baseline="middle" font-weight="bold">DENIED</text>
+
+  <!-- DEN → L (down then left) -->
+  <path d="M470,450 L470,740 L330,740" fill="none" stroke="#000" stroke-width="1" marker-end="url(#arr)"/>
+
+  <!-- G yes → H -->
+  <line x1="230" y1="462" x2="230" y2="466" stroke="#000" stroke-width="1" marker-end="url(#arr)"/>
+  <text x="240" y="468" font-size="8.5" font-style="italic">yes</text>
+
+  <!-- H: Cross gate into lot -->
+  <rect x="130" y="466" width="200" height="36" fill="#fff" stroke="#000" stroke-width="1.5"/>
+  <text x="230" y="484" text-anchor="middle" dominant-baseline="middle">Cross gate into lot</text>
+
+  <!-- H → I -->
+  <line x1="230" y1="502" x2="230" y2="530" stroke="#000" stroke-width="1" marker-end="url(#arr)"/>
+
+  <!-- I: SEARCH -->
+  <rect x="130" y="530" width="200" height="36" fill="#fff" stroke="#000" stroke-width="1.5"/>
+  <text x="230" y="548" text-anchor="middle" dominant-baseline="middle">SEARCH for slot</text>
+
+  <!-- I → J -->
+  <line x1="230" y1="566" x2="230" y2="594" stroke="#000" stroke-width="1" marker-end="url(#arr)"/>
+
+  <!-- J: PARKED (shaded) -->
+  <rect x="130" y="594" width="200" height="36" fill="#e0e0e0" stroke="#000" stroke-width="1.5"/>
+  <text x="230" y="612" text-anchor="middle" dominant-baseline="middle">PARKED – dwell while shopping</text>
+
+  <!-- J → K -->
+  <line x1="230" y1="630" x2="230" y2="658" stroke="#000" stroke-width="1" marker-end="url(#arr)"/>
+
+  <!-- K: Exit requested -->
+  <rect x="130" y="658" width="200" height="36" fill="#fff" stroke="#000" stroke-width="1.5"/>
+  <text x="230" y="676" text-anchor="middle" dominant-baseline="middle">Exit requested – release slot</text>
+
+  <!-- K → L -->
+  <line x1="230" y1="694" x2="230" y2="722" stroke="#000" stroke-width="1" marker-end="url(#arr)"/>
+
+  <!-- L: EXIT QUEUE (double border) -->
+  <rect x="130" y="722" width="200" height="36" fill="#f0f0f0" stroke="#000" stroke-width="1.5"/>
+  <rect x="133" y="725" width="194" height="30" fill="none" stroke="#000" stroke-width="0.7"/>
+  <text x="230" y="740" text-anchor="middle" dominant-baseline="middle" font-weight="bold">
+    Join EXIT QUEUE
+  </text>
+
+  <!-- L → M -->
+  <line x1="230" y1="758" x2="230" y2="786" stroke="#000" stroke-width="1" marker-end="url(#arr)"/>
+
+  <!-- M: diamond "Exit gate free?" -->
+  <polygon points="230,786 300,816 230,846 160,816"
+           fill="#fff" stroke="#000" stroke-width="1.5"/>
+  <text x="230" y="811" text-anchor="middle" dominant-baseline="middle">Exit gate</text>
+  <text x="230" y="823" text-anchor="middle" dominant-baseline="middle">free?</text>
+
+  <!-- M no → loop right back to L -->
+  <path d="M300,816 L360,816 L360,740 L330,740" fill="none" stroke="#000" stroke-width="1" marker-end="url(#arr)"/>
+  <text x="334" y="810" text-anchor="start" font-size="8.5" font-style="italic">no</text>
+
+  <!-- M yes → N -->
+  <line x1="230" y1="846" x2="230" y2="850" stroke="#000" stroke-width="1" marker-end="url(#arr)"/>
+  <text x="240" y="852" font-size="8.5" font-style="italic">yes</text>
+
+  <!-- N: Exit service (shaded) -->
+  <rect x="130" y="850" width="200" height="36" fill="#e0e0e0" stroke="#000" stroke-width="1.5"/>
+  <text x="230" y="868" text-anchor="middle" dominant-baseline="middle">Exit service at gate</text>
+
+  <!-- N → O -->
+  <line x1="230" y1="886" x2="230" y2="914" stroke="#000" stroke-width="1" marker-end="url(#arr)"/>
+
+  <!-- O: Merge to outside road -->
+  <rect x="130" y="914" width="200" height="36" fill="#fff" stroke="#000" stroke-width="1.5"/>
+  <text x="230" y="932" text-anchor="middle" dominant-baseline="middle">Merge to outside road</text>
+
+  <!-- O → P -->
+  <line x1="230" y1="950" x2="230" y2="978" stroke="#000" stroke-width="1" marker-end="url(#arr)"/>
+
+  <!-- P: end rounded rect (DONE) -->
+  <rect x="120" y="978" width="220" height="36" rx="18" ry="18"
+        fill="#d8d8d8" stroke="#000" stroke-width="2"/>
+  <text x="230" y="996" text-anchor="middle" dominant-baseline="middle" font-weight="bold">
+    DONE – departed
+  </text>
+
+  <!-- LEGEND -->
+  <rect x="20" y="980" width="60" height="56" rx="2" fill="none" stroke="#888" stroke-width="0.5" stroke-dasharray="3,2"/>
+  <text x="50" y="972" text-anchor="middle" font-size="8" fill="#555">Legend</text>
+  <!-- start/end -->
+  <rect x="24" y="984" width="52" height="14" rx="7" fill="#d8d8d8" stroke="#000" stroke-width="1"/>
+  <text x="50" y="991" text-anchor="middle" dominant-baseline="middle" font-size="7.5">Start / End</text>
+  <!-- queue -->
+  <rect x="24" y="1002" width="52" height="14" fill="#f0f0f0" stroke="#000" stroke-width="1"/>
+  <rect x="26" y="1004" width="48" height="10" fill="none" stroke="#000" stroke-width="0.5"/>
+  <text x="50" y="1009" text-anchor="middle" dominant-baseline="middle" font-size="7.5">Queue</text>
+  <!-- gate service -->
+  <rect x="24" y="1020" width="52" height="14" fill="#e0e0e0" stroke="#000" stroke-width="1"/>
+  <text x="50" y="1027" text-anchor="middle" dominant-baseline="middle" font-size="7.5">Gate service</text>
+
+</svg>
+</div>
+<p class="caption">Figure 1. Per-vehicle lifecycle in the discrete-event simulation. Shaded boxes = gate-service steps; double-bordered boxes = queues; dashed box = denied branch.</p>
+<p class="note"><b>State mapping:</b> <i>scheduled</i> (A) → <i>entry_queue</i> (B) → <i>approaching_gate</i> (D) → <i>gate_wait</i> (E) → <i>gate_crossing</i> (H) → <i>searching</i> (I) → <i>parked</i> (J) → <i>exit_queue</i> (L) → <i>exiting</i> (N/O) → <i>done</i> (P), with the <i>denied</i> branch from G.</p>
+<p class="note"><b>Resources held:</b> the entry gate is held from D through H; the exit gate from N through O; a parking slot from F (reserve) until K (release).</p>
+
+
+<!-- ================================================================ -->
+<h2>Figure 2. Discrete-Event Conceptual Model</h2>
+
+<div class="fig-wrap">
+<!--
+  Left-to-right swimlane showing the five DES groups:
+  Entities → Events → Resources → Queues → State
+  Each group in a vertical column (swimlane).
+  Arrows flow left-to-right along two horizontal paths.
+  Dashed "updates" arrows go to State from Resources.
+
+  Column x-centres: 60, 175, 310, 430, 545
+  All nodes at y=200 (horizontal lane).
+-->
+<svg viewBox="0 0 650 480" width="580" xmlns="http://www.w3.org/2000/svg"
+     font-family="Times New Roman, Times, serif" font-size="9">
+  <defs>
+    <marker id="arr2" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L7,3 z" fill="#000"/>
+    </marker>
+    <marker id="arr2d" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L7,3 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <!-- Column headers -->
+  <text x="65"  y="18" text-anchor="middle" font-weight="bold" font-size="9.5">Entities</text>
+  <text x="185" y="18" text-anchor="middle" font-weight="bold" font-size="9.5">Events</text>
+  <text x="330" y="18" text-anchor="middle" font-weight="bold" font-size="9.5">Resources</text>
+  <text x="455" y="18" text-anchor="middle" font-weight="bold" font-size="9.5">Queues</text>
+  <text x="570" y="18" text-anchor="middle" font-weight="bold" font-size="9.5">State</text>
+
+  <!-- Column separator lines -->
+  <line x1="120" y1="22" x2="120" y2="465" stroke="#bbb" stroke-width="0.7" stroke-dasharray="3,3"/>
+  <line x1="248" y1="22" x2="248" y2="465" stroke="#bbb" stroke-width="0.7" stroke-dasharray="3,3"/>
+  <line x1="395" y1="22" x2="395" y2="465" stroke="#bbb" stroke-width="0.7" stroke-dasharray="3,3"/>
+  <line x1="510" y1="22" x2="510" y2="465" stroke="#bbb" stroke-width="0.7" stroke-dasharray="3,3"/>
+
+  <!-- ---- ENTITIES ---- -->
+  <!-- V: Vehicles -->
+  <rect x="10" y="170" width="110" height="40" fill="#f5f5f5" stroke="#000" stroke-width="1.2"/>
+  <text x="65" y="187" text-anchor="middle" dominant-baseline="middle">Vehicles</text>
+  <text x="65" y="200" text-anchor="middle" dominant-baseline="middle">(cars &amp; motorcycles)</text>
+
+  <!-- ---- EVENTS column ---- -->
+  <!-- EA: arrival -->
+  <rect x="128" y="68" width="112" height="30" fill="#fff" stroke="#000" stroke-width="1.2"/>
+  <text x="184" y="83" text-anchor="middle" dominant-baseline="middle">arrival</text>
+
+  <!-- ES: gate service -->
+  <rect x="128" y="108" width="112" height="30" fill="#e0e0e0" stroke="#000" stroke-width="1.2"/>
+  <text x="184" y="123" text-anchor="middle" dominant-baseline="middle">gate service start/end</text>
+
+  <!-- ESR: search/park -->
+  <rect x="128" y="148" width="112" height="30" fill="#fff" stroke="#000" stroke-width="1.2"/>
+  <text x="184" y="163" text-anchor="middle" dominant-baseline="middle">search / park</text>
+
+  <!-- EX: exit request -->
+  <rect x="128" y="188" width="112" height="30" fill="#fff" stroke="#000" stroke-width="1.2"/>
+  <text x="184" y="203" text-anchor="middle" dominant-baseline="middle">exit request</text>
+
+  <!-- ED: departure -->
+  <rect x="128" y="228" width="112" height="30" fill="#e0e0e0" stroke="#000" stroke-width="1.2"/>
+  <text x="184" y="243" text-anchor="middle" dominant-baseline="middle">departure</text>
+
+  <!-- ---- RESOURCES column ---- -->
+  <!-- Entry gate (cylinder) -->
+  <ellipse cx="330" cy="78" rx="58" ry="10" fill="#e8e8e8" stroke="#000" stroke-width="1.2"/>
+  <rect x="272" y="78" width="116" height="36" fill="#e8e8e8" stroke="#000" stroke-width="1.2"/>
+  <ellipse cx="330" cy="114" rx="58" ry="10" fill="#e8e8e8" stroke="#000" stroke-width="1.2"/>
+  <text x="330" y="93"  text-anchor="middle" dominant-baseline="middle" font-size="8.5">Entry gate</text>
+  <text x="330" y="106" text-anchor="middle" dominant-baseline="middle" font-size="8.5">(capacity 1 per lane)</text>
+
+  <!-- Exit gate (cylinder) -->
+  <ellipse cx="330" cy="160" rx="58" ry="10" fill="#e8e8e8" stroke="#000" stroke-width="1.2"/>
+  <rect x="272" y="160" width="116" height="36" fill="#e8e8e8" stroke="#000" stroke-width="1.2"/>
+  <ellipse cx="330" cy="196" rx="58" ry="10" fill="#e8e8e8" stroke="#000" stroke-width="1.2"/>
+  <text x="330" y="175" text-anchor="middle" dominant-baseline="middle" font-size="8.5">Exit gate</text>
+  <text x="330" y="188" text-anchor="middle" dominant-baseline="middle" font-size="8.5">(capacity 1 per lane)</text>
+
+  <!-- Parking slots (cylinder) -->
+  <ellipse cx="330" cy="244" rx="58" ry="10" fill="#e8e8e8" stroke="#000" stroke-width="1.2"/>
+  <rect x="272" y="244" width="116" height="36" fill="#e8e8e8" stroke="#000" stroke-width="1.2"/>
+  <ellipse cx="330" cy="280" rx="58" ry="10" fill="#e8e8e8" stroke="#000" stroke-width="1.2"/>
+  <text x="330" y="257" text-anchor="middle" dominant-baseline="middle" font-size="8.5">Parking slots</text>
+  <text x="330" y="270" text-anchor="middle" dominant-baseline="middle" font-size="8.5">(car + motorcycle pools)</text>
+
+  <!-- ---- QUEUES column ---- -->
+  <!-- Entry queue (double border) -->
+  <rect x="408" y="92" width="98" height="36" fill="#f0f0f0" stroke="#000" stroke-width="1.2"/>
+  <rect x="411" y="95" width="92" height="30" fill="none" stroke="#000" stroke-width="0.6"/>
+  <text x="457" y="110" text-anchor="middle" dominant-baseline="middle" font-weight="bold" font-size="8.5">Entry queue</text>
+
+  <!-- Exit queue (double border) -->
+  <rect x="408" y="212" width="98" height="36" fill="#f0f0f0" stroke="#000" stroke-width="1.2"/>
+  <rect x="411" y="215" width="92" height="30" fill="none" stroke="#000" stroke-width="0.6"/>
+  <text x="457" y="230" text-anchor="middle" dominant-baseline="middle" font-weight="bold" font-size="8.5">Exit queue</text>
+
+  <!-- ---- STATE column ---- -->
+  <rect x="518" y="68" width="120" height="130" fill="#f5f5f5" stroke="#000" stroke-width="1.2"/>
+  <text x="578" y="90"  text-anchor="middle" dominant-baseline="middle" font-size="8.5">vehicle state ×11</text>
+  <text x="578" y="106" text-anchor="middle" dominant-baseline="middle" font-size="8.5">queue lengths</text>
+  <text x="578" y="122" text-anchor="middle" dominant-baseline="middle" font-size="8.5">slots free / occupied</text>
+  <text x="578" y="138" text-anchor="middle" dominant-baseline="middle" font-size="8.5">denied / completed</text>
+  <text x="578" y="154" text-anchor="middle" dominant-baseline="middle" font-size="8.5">sim clock</text>
+  <text x="578" y="170" text-anchor="middle" dominant-baseline="middle" font-size="8.5" font-style="italic">(State variables)</text>
+
+  <!-- ===== FLOW ARROWS ===== -->
+  <!-- Top path: V → arrival → entry queue → entry gate → search/park → parking slots -->
+  <!-- V → EA -->
+  <path d="M120,183 L128,83" fill="none" stroke="#000" stroke-width="1" marker-end="url(#arr2)"/>
+  <!-- EA → EQ -->
+  <line x1="240" y1="83" x2="408" y2="110" stroke="#000" stroke-width="1" marker-end="url(#arr2)"/>
+  <!-- EQ → entry gate -->
+  <line x1="506" y1="110" x2="510" y2="110" stroke="#000" stroke-width="1"/>
+  <path d="M510,110 L388,96" fill="none" stroke="#000" stroke-width="1" marker-end="url(#arr2)"/>
+  <!-- gate service → search/park label -->
+  <line x1="240" y1="163" x2="272" y2="163" stroke="#000" stroke-width="1" marker-end="url(#arr2)"/>
+  <!-- search/park → parking slots -->
+  <line x1="388" y1="260" x2="272" y2="263" stroke="#000" stroke-width="1" marker-end="url(#arr2)" transform="scale(-1,1) translate(-660,0)"/>
+
+  <!-- Bottom path: search/park → exit request → exit queue → exit gate → departure -->
+  <!-- ESR → EX -->
+  <line x1="184" y1="178" x2="184" y2="188" stroke="#000" stroke-width="1" marker-end="url(#arr2)"/>
+  <!-- EX → XQ -->
+  <line x1="240" y1="203" x2="408" y2="230" stroke="#000" stroke-width="1" marker-end="url(#arr2)"/>
+  <!-- XQ → exit gate -->
+  <path d="M506,230 L388,178" fill="none" stroke="#000" stroke-width="1" marker-end="url(#arr2)"/>
+  <!-- exit gate → departure -->
+  <line x1="240" y1="243" x2="272" y2="178" stroke="#000" stroke-width="1" marker-end="url(#arr2)" transform="scale(-1,1) translate(-460,0)"/>
+
+  <!-- Dashed "updates" arrows: resources → State -->
+  <!-- entry gate → state -->
+  <line x1="388" y1="96" x2="518" y2="110" stroke="#555" stroke-width="0.8" stroke-dasharray="4,2" marker-end="url(#arr2d)"/>
+  <!-- exit gate → state -->
+  <line x1="388" y1="176" x2="518" y2="148" stroke="#555" stroke-width="0.8" stroke-dasharray="4,2" marker-end="url(#arr2d)"/>
+  <!-- parking slots → state -->
+  <line x1="388" y1="262" x2="518" y2="185" stroke="#555" stroke-width="0.8" stroke-dasharray="4,2" marker-end="url(#arr2d)"/>
+  <!-- dashed label -->
+  <text x="464" y="207" text-anchor="middle" font-size="7.5" font-style="italic" fill="#555">updates</text>
+
+  <!-- Main flow path markers (cleaner horizontal) -->
+  <!-- V → events (main horizontal) -->
+  <line x1="120" y1="190" x2="128" y2="168" stroke="#000" stroke-width="1" marker-end="url(#arr2)"/>
+
+  <!-- Legend -->
+  <rect x="10" y="310" width="185" height="100" rx="2" fill="none" stroke="#aaa" stroke-width="0.6" stroke-dasharray="3,2"/>
+  <text x="102" y="302" text-anchor="middle" font-size="8" fill="#555">Legend</text>
+  <line x1="20" y1="328" x2="70" y2="328" stroke="#000" stroke-width="1" marker-end="url(#arr2)"/>
+  <text x="78" y="332" font-size="8">Flow (solid arrow)</text>
+  <line x1="20" y1="352" x2="70" y2="352" stroke="#555" stroke-width="0.8" stroke-dasharray="4,2" marker-end="url(#arr2d)"/>
+  <text x="78" y="356" font-size="8">State update (dashed)</text>
+  <ellipse cx="44" cy="376" rx="26" ry="9" fill="#e8e8e8" stroke="#000" stroke-width="1"/>
+  <text x="78" y="380" font-size="8">Resource (cylinder)</text>
+  <rect x="18" y="394" width="52" height="16" fill="#f0f0f0" stroke="#000" stroke-width="1"/>
+  <rect x="20" y="396" width="48" height="12" fill="none" stroke="#000" stroke-width="0.5"/>
+  <text x="78" y="404" font-size="8">Queue (double border)</text>
+
+</svg>
+</div>
+<p class="caption">Figure 2. Discrete-event conceptual model showing entities, events, resources, queues, and state variables. Solid arrows = flow direction; dashed arrows = state updates. Cylinders = SimPy resources.</p>
+
+
+<!-- ================================================================ -->
+<h2>Figure 3. Software Architecture</h2>
+
+<div class="fig-wrap">
+<!--
+  Three-tier vertical diagram:
+    Browser dashboard (top)
+      ↓↑ GET /api/scenarios
+      ↓↑ GET /api/simulation?scenario=
+      ↓↑ GET /api/compare
+    FastAPI app (middle)
+      ↓↑ run_simulation()
+    SimPy model (bottom)
+      → frames + metrics (JSON) → API → Browser
+      → Browser replays timeline → Reviewer (right)
+-->
+<svg viewBox="0 0 600 390" width="520" xmlns="http://www.w3.org/2000/svg"
+     font-family="Times New Roman, Times, serif" font-size="9.5">
+  <defs>
+    <marker id="arr3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#000"/>
+    </marker>
+    <marker id="arr3r" markerWidth="8" markerHeight="8" refX="2" refY="3" orient="auto">
+      <path d="M8,0 L8,6 L0,3 z" fill="#000"/>
+    </marker>
+  </defs>
+
+  <!-- Browser dashboard -->
+  <rect x="140" y="20" width="240" height="60" rx="4"
+        fill="#f5f5f5" stroke="#000" stroke-width="1.8"/>
+  <text x="260" y="43" text-anchor="middle" dominant-baseline="middle" font-weight="bold">Browser dashboard</text>
+  <text x="260" y="58" text-anchor="middle" dominant-baseline="middle" font-style="italic" font-size="8.5">app/static/: index.html, app.js, style.css</text>
+
+  <!-- API arrows (left side, going down) -->
+  <!-- three labeled arrows between browser and API -->
+  <!-- arrow down: GET /api/scenarios -->
+  <line x1="210" y1="80" x2="210" y2="168" stroke="#000" stroke-width="0.9" marker-end="url(#arr3)"/>
+  <text x="165" y="110" text-anchor="middle" font-size="7.5" font-style="italic">GET /api/scenarios</text>
+  <!-- arrow down: GET /api/simulation -->
+  <line x1="230" y1="80" x2="230" y2="168" stroke="#000" stroke-width="0.9" marker-end="url(#arr3)"/>
+  <text x="182" y="130" text-anchor="middle" font-size="7.5" font-style="italic">GET /api/simulation?</text>
+  <!-- arrow down: GET /api/compare -->
+  <line x1="250" y1="80" x2="250" y2="168" stroke="#000" stroke-width="0.9" marker-end="url(#arr3)"/>
+  <text x="197" y="150" text-anchor="middle" font-size="7.5" font-style="italic">GET /api/compare</text>
+
+  <!-- arrow up: JSON response -->
+  <line x1="310" y1="168" x2="310" y2="80" stroke="#000" stroke-width="0.9" marker-end="url(#arr3)"/>
+  <text x="360" y="130" text-anchor="middle" font-size="7.5" font-style="italic">JSON response</text>
+
+  <!-- FastAPI app -->
+  <rect x="140" y="168" width="240" height="60" rx="4"
+        fill="#e0e0e0" stroke="#000" stroke-width="1.8"/>
+  <text x="260" y="191" text-anchor="middle" dominant-baseline="middle" font-weight="bold">FastAPI app</text>
+  <text x="260" y="206" text-anchor="middle" dominant-baseline="middle" font-style="italic" font-size="8.5">app/api.py</text>
+
+  <!-- API → SimPy -->
+  <line x1="240" y1="228" x2="240" y2="298" stroke="#000" stroke-width="0.9" marker-end="url(#arr3)"/>
+  <text x="192" y="266" text-anchor="middle" font-size="7.5" font-style="italic">run_simulation()</text>
+  <!-- SimPy → API -->
+  <line x1="290" y1="298" x2="290" y2="228" stroke="#000" stroke-width="0.9" marker-end="url(#arr3)"/>
+  <text x="352" y="272" text-anchor="middle" font-size="7.5" font-style="italic">frames + metrics</text>
+  <text x="352" y="284" text-anchor="middle" font-size="7.5" font-style="italic">(JSON)</text>
+
+  <!-- SimPy model -->
+  <rect x="140" y="298" width="240" height="60" rx="4"
+        fill="#e8e8e8" stroke="#000" stroke-width="1.8"/>
+  <text x="260" y="321" text-anchor="middle" dominant-baseline="middle" font-weight="bold">SimPy model</text>
+  <text x="260" y="336" text-anchor="middle" dominant-baseline="middle" font-style="italic" font-size="8.5">app/simulation.py</text>
+
+  <!-- Reviewer (oval) on the right -->
+  <ellipse cx="520" cy="50" rx="62" ry="28" fill="#fff" stroke="#000" stroke-width="1.5"/>
+  <text x="520" y="46" text-anchor="middle" dominant-baseline="middle" font-weight="bold" font-size="9">Reviewer</text>
+  <text x="520" y="59" text-anchor="middle" dominant-baseline="middle" font-size="8">(browser)</text>
+
+  <!-- Browser → Reviewer -->
+  <path d="M380,50 L458,50" fill="none" stroke="#000" stroke-width="0.9" marker-end="url(#arr3)"/>
+  <text x="420" y="42" text-anchor="middle" font-size="7.5" font-style="italic">replays timeline</text>
+  <text x="420" y="63" text-anchor="middle" font-size="7.5" font-style="italic">+ renders metrics</text>
+
+  <!-- note box bottom-left -->
+  <rect x="10" y="300" width="118" height="72" rx="3" fill="none" stroke="#aaa" stroke-width="0.7" stroke-dasharray="3,2"/>
+  <text x="69" y="315" text-anchor="middle" font-size="7.5" font-weight="bold">/api/compare</text>
+  <text x="69" y="329" text-anchor="middle" font-size="7.5">metrics-only for all</text>
+  <text x="69" y="341" text-anchor="middle" font-size="7.5">5 scenarios; cached</text>
+  <text x="69" y="353" text-anchor="middle" font-size="7.5">per (map, scenario).</text>
+  <text x="69" y="365" text-anchor="middle" font-size="7.5">Powers compare table.</text>
+  <line x1="128" y1="336" x2="140" y2="228" stroke="#aaa" stroke-width="0.6" stroke-dasharray="3,2"/>
+
+</svg>
+</div>
+<p class="caption">Figure 3. Software architecture. The browser issues three API calls; the FastAPI layer runs SimPy on demand and returns JSON; results are replayed as an animation with live metric panels and a scenario-comparison table.</p>
+
+</body>
+</html>
