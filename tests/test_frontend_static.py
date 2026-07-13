@@ -17,7 +17,7 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("slotLayer", html)
         self.assertIn("carLayer", html)
         self.assertIn('/static/style.css?v=25', html)
-        self.assertIn('/static/app.js?v=27', html)
+        self.assertIn('/static/app.js?v=28', html)
         self.assertIn("metricMotorcycles", html)
         self.assertIn("Vehicle Mix", html)
         self.assertIn("simulationStatus", html)
@@ -97,10 +97,11 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("catch (error)", js)
         self.assertIn("scenarioSelect.disabled", js)
         self.assertIn("speedSlider.disabled", js)
-        # Playback CSS duration tracks keyframe-scaled wall interval (not fixed 40/speed).
+        # Playback uses fixed frame cadence (original 40ms at 1x), not sim-delta stretch.
+        self.assertIn("FRAME_INTERVAL_MS", js)
         self.assertIn("syncTransitionDuration", js)
         self.assertIn("--transition-duration", js)
-        self.assertIn("baseIntervalMsAt", js)
+        self.assertNotIn("baseIntervalMsAt", js)
         self.assertIn("wheels-moving", js)
         self.assertIn("topdown-vehicle", js)
         self.assertIn('slot.state === "unavailable"', js)
