@@ -593,29 +593,14 @@ function resetPlayback() {
   if (simulationData) renderFrame(simulationData.frames[0], null, 0);
 }
 
-// Wall-clock ms that used to advance one dense snapshot (0.05 sim minutes).
-const REFERENCE_MS = 40;
-const REFERENCE_SIM_MINUTES = 0.05;
+// Match pre-compact playback: advance one frame every 40ms at 1x (not wall-clock
+// sim-time). Sparse keyframes therefore play snappier overall; path smoothness
+// comes from denser compact max_gap (server), not from stretching each step.
+const FRAME_INTERVAL_MS = 40;
 let lastTransitionDurationMs = null;
 
-/** Wall-clock ms for one keyframe step at 1x (scales with sparse compact gaps). */
-function baseIntervalMsAt(index) {
-  if (!simulationData?.frames?.length) return REFERENCE_MS;
-  const frames = simulationData.frames;
-  const i = Math.max(0, Math.min(index, frames.length - 1));
-  const t0 = frames[i].time_minutes;
-  const t1 = frames[Math.min(i + 1, frames.length - 1)].time_minutes;
-  const simDelta = Math.max(REFERENCE_SIM_MINUTES, t1 - t0);
-  return (simDelta / REFERENCE_SIM_MINUTES) * REFERENCE_MS;
-}
-
-/**
- * Keep CSS --transition-duration in step with the current wall-clock frame gap so
- * any CSS motion spans sparse keyframes instead of the old dense 40ms cadence.
- */
-function syncTransitionDuration(baseIntervalMs = baseIntervalMsAt(frameIndex)) {
-  const wallMs = baseIntervalMs / speedMultiplier;
-  const duration = Math.max(40, Math.round(wallMs * 0.85));
+function syncTransitionDuration() {
+  const duration = Math.max(16, Math.round(FRAME_INTERVAL_MS / speedMultiplier));
   if (lastTransitionDurationMs === duration) return;
   lastTransitionDurationMs = duration;
   document.documentElement.style.setProperty("--transition-duration", `${duration}ms`);
@@ -628,14 +613,12 @@ function tick(timestamp) {
   }
 
   if (!lastTick) lastTick = timestamp;
-  // Scale interval by keyframe time delta so sparse compact timelines keep real-time pace.
-  const frames = simulationData.frames;
-  const baseIntervalMs = baseIntervalMsAt(frameIndex);
-  const currentInterval = baseIntervalMs / speedMultiplier;
-  syncTransitionDuration(baseIntervalMs);
+  // Same cadence as original dense timeline (1x ≈ former 10x demo speed).
+  const currentInterval = FRAME_INTERVAL_MS / speedMultiplier;
   const elapsed = timestamp - lastTick;
   const subProgress = Math.min(1, elapsed / currentInterval);
 
+  const frames = simulationData.frames;
   const nextFrameIndex = (frameIndex + 1) % frames.length;
   const nextFrame = frames[nextFrameIndex];
   renderFrame(frames[frameIndex], nextFrame, subProgress);
@@ -860,13 +843,11 @@ if (speedSlider && speedValue) {
   speedSlider.addEventListener("input", (event) => {
     speedMultiplier = parseFloat(event.target.value);
     speedValue.textContent = `${speedMultiplier.toFixed(2)}x`;
-    // Match CSS transition length to the keyframe-scaled wall interval, not fixed 40ms.
     syncTransitionDuration();
   });
 }
 
-// Initial CSS duration (dense-frame floor); tick will re-sync to sparse gaps once data loads.
-syncTransitionDuration(REFERENCE_MS);
+syncTransitionDuration();
 
 setLoadingState(true);
 preloadMapBackgrounds();

@@ -28,7 +28,15 @@ _ROSTER_KEYS: tuple[str, ...] = (
 )
 
 
-def compact_simulation(full: dict, *, max_gap_minutes: float = 0.25) -> dict:
+# Default max sim-time between keyframes while discrete state is unchanged.
+# 0.25 made path motion too sparse (cars jumped / crawled). 0.1 keeps payload
+# tiny while sampling the search/exit paths often enough for smooth playback.
+DEFAULT_MAX_GAP_MINUTES = 0.1
+
+
+def compact_simulation(
+    full: dict, *, max_gap_minutes: float = DEFAULT_MAX_GAP_MINUTES
+) -> dict:
     """Encode a full simulation result dict into the compact wire format."""
     frames: list[dict] = full["frames"]
     keep_indices = _select_keyframe_indices(frames, max_gap_minutes)
