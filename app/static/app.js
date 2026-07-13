@@ -85,6 +85,106 @@ async function fetchJson(url) {
   return response.json();
 }
 
+// Client-side LRU for expanded simulation payloads (key -> full-shape data).
+const clientSimulationCache = new Map();
+const CLIENT_CACHE_MAX = 12;
+
+function simulationCacheKey(map, scenario, customQuery) {
+  return `${map}|${scenario}|${customQuery}|compact`;
+}
+
+/** Expand compact keyframe wire format into full frames for renderFrame. */
+function expandCompactSimulation(payload) {
+  if (!payload || payload.format !== "compact") return payload;
+  const rosterById = new Map((payload.roster || []).map((r) => [r.id, r]));
+  const frames = [];
+  const carState = new Map();
+  const slotState = new Map(
+    (payload.slots || []).map((s) => [s.id, { ...s, state: s.state || "free" }])
+  );
+
+  for (const kf of payload.keyframes || []) {
+    for (const [id, delta] of Object.entries(kf.v || {})) {
+      const numId = Number(id);
+      const prev = carState.get(numId) || { ...(rosterById.get(numId) || { id: numId }) };
+      const next = { ...prev };
+      if (delta.s !== undefined) next.state = delta.s;
+      if (delta.x !== undefined) next.x = delta.x;
+      if (delta.y !== undefined) next.y = delta.y;
+      if (delta.h !== undefined) next.heading = delta.h;
+      if (delta.p !== undefined) next.exit_phase = delta.p;
+      if (delta.sid !== undefined) next.slot_id = delta.sid;
+      if (delta.qa !== undefined) next.queue_arrived = delta.qa;
+      next.id = numId;
+      carState.set(numId, next);
+    }
+    for (const [sid, st] of Object.entries(kf.s || {})) {
+      const base = slotState.get(sid) || { id: sid };
+      slotState.set(sid, { ...base, state: st });
+    }
+    const cars = Array.from(carState.values()).map((c) => ({ ...c }));
+    // Ensure every roster car appears (e.g. still scheduled).
+    for (const r of payload.roster || []) {
+      if (!carState.has(r.id)) {
+        cars.push({
+          ...r,
+          state: "scheduled",
+          x: 0,
+          y: 0,
+          heading: null,
+          slot_id: null,
+          exit_phase: null,
+          queue_arrived: false,
+        });
+      }
+    }
+    frames.push({
+      time_minutes: kf.t,
+      cars,
+      slots: Array.from(slotState.values()),
+      entry_gate_open: !!(kf.g && kf.g.e),
+      exit_gate_open: !!(kf.g && kf.g.x),
+      current_entry_queue: kf.q ? kf.q.e : 0,
+      current_exit_queue: kf.q ? kf.q.x : 0,
+      parked_count: kf.q ? kf.q.p : 0,
+      available_slots: kf.q ? kf.q.a : 0,
+      denied_count: kf.q ? kf.q.d : 0,
+      completed_count: kf.q ? kf.q.c : 0,
+    });
+  }
+
+  const timeline = payload.timeline || {};
+  return {
+    scenario: payload.scenario,
+    defaults: payload.defaults,
+    timeline: {
+      snapshot_interval_minutes:
+        timeline.keyframe_max_gap_minutes || timeline.snapshot_interval_minutes,
+      end_minute: timeline.end_minute,
+    },
+    slots: payload.slots,
+    frames,
+    metrics: payload.metrics,
+  };
+}
+
+function rememberClientCache(key, value) {
+  if (clientSimulationCache.has(key)) clientSimulationCache.delete(key);
+  clientSimulationCache.set(key, value);
+  while (clientSimulationCache.size > CLIENT_CACHE_MAX) {
+    const oldest = clientSimulationCache.keys().next().value;
+    clientSimulationCache.delete(oldest);
+  }
+}
+
+let loadTimer = null;
+function scheduleLoadSimulation() {
+  clearTimeout(loadTimer);
+  loadTimer = setTimeout(() => {
+    loadSimulation();
+  }, 200);
+}
+
 const CUSTOM_MAP_COORDINATE_TRANSFORM = {
   xScale: 0.95815,
   xOffset: 1.94316,
@@ -260,8 +360,14 @@ function updateSlots(frame) {
   frame.slots.forEach((slot) => {
     const node = slotNodes.get(slot.id);
     if (!node) return;
-    node.className = slotClass(slot);
-    node.style.zIndex = slot.state === "unavailable" ? "260" : `${100 + slot.row}`;
+    const nextClass = slotClass(slot);
+    if (node.className !== nextClass) {
+      node.className = nextClass;
+    }
+    const nextZ = slot.state === "unavailable" ? "260" : `${100 + slot.row}`;
+    if (node.style.zIndex !== nextZ) {
+      node.style.zIndex = nextZ;
+    }
   });
 }
 
@@ -288,23 +394,23 @@ function shouldInterpolatePosition(car, nextCar) {
   return car.exit_phase === nextCar.exit_phase && ["merge", "road"].includes(car.exit_phase);
 }
 
+function setTextIfChanged(el, value) {
+  if (!el) return;
+  const text = String(value);
+  if (el.textContent !== text) {
+    el.textContent = text;
+  }
+}
+
 function renderFrame(frame, nextFrame, subProgress) {
   ensureCars(frame);
   updateSlots(frame);
 
   if (entryGateArm) {
-    if (frame.entry_gate_open) {
-      entryGateArm.classList.add("open");
-    } else {
-      entryGateArm.classList.remove("open");
-    }
+    entryGateArm.classList.toggle("open", Boolean(frame.entry_gate_open));
   }
   if (exitGateArm) {
-    if (frame.exit_gate_open) {
-      exitGateArm.classList.add("open");
-    } else {
-      exitGateArm.classList.remove("open");
-    }
+    exitGateArm.classList.toggle("open", Boolean(frame.exit_gate_open));
   }
   // Custom-map animated gate arms (open with the same gate-state flags).
   customGateNodes.forEach((node) => {
@@ -312,20 +418,25 @@ function renderFrame(frame, nextFrame, subProgress) {
     node.classList.toggle("open", Boolean(open));
   });
 
-  currentTime.textContent = prettyMinutes(frame.time_minutes);
-  entryQueue.textContent = frame.current_entry_queue;
-  availableSlots.textContent = frame.available_slots;
-  exitQueue.textContent = frame.current_exit_queue;
+  setTextIfChanged(currentTime, prettyMinutes(frame.time_minutes));
+  setTextIfChanged(entryQueue, frame.current_entry_queue);
+  setTextIfChanged(availableSlots, frame.available_slots);
+  setTextIfChanged(exitQueue, frame.current_exit_queue);
+
+  const nextById = nextFrame
+    ? new Map(nextFrame.cars.map((c) => [c.id, c]))
+    : null;
+  const movingStates = new Set(["approaching_gate", "gate_crossing", "searching", "exit_queue", "exiting", "denied"]);
 
   frame.cars.forEach((car) => {
     const node = carNodes.get(car.id);
+    if (!node) return;
 
     // Sub-frame interpolation between current and next frame
     let interpX = car.x;
     let interpY = car.y;
-    const movingStates = new Set(["approaching_gate", "gate_crossing", "searching", "exit_queue", "exiting", "denied"]);
-    if (nextFrame && subProgress > 0 && movingStates.has(car.state)) {
-      const nextCar = nextFrame.cars.find((c) => c.id === car.id);
+    if (nextById && subProgress > 0 && movingStates.has(car.state)) {
+      const nextCar = nextById.get(car.id);
       if (nextCar && movingStates.has(nextCar.state) && shouldInterpolatePosition(car, nextCar)) {
         const interp = interpolatePosition(car.x, car.y, nextCar.x, nextCar.y, subProgress);
         interpX = interp.x;
@@ -335,14 +446,33 @@ function renderFrame(frame, nextFrame, subProgress) {
 
     const point = mapScenePoint(interpX, interpY, { row: sceneMappingRow(car) });
     const cssPoint = { left: `${point.x}%`, top: `${point.y}%` };
-    node.className = carClass(car);
-    node.style.left = cssPoint.left;
-    node.style.top = cssPoint.top;
+    const nextClass = carClass(car);
+    if (node.className !== nextClass) {
+      node.className = nextClass;
+    }
+    if (node.style.left !== cssPoint.left) {
+      node.style.left = cssPoint.left;
+    }
+    if (node.style.top !== cssPoint.top) {
+      node.style.top = cssPoint.top;
+    }
     const angle = movementAngle(car, cssPoint, node);
-    node.style.transform = `translate(-50%, -50%) rotate(${angle}deg)`;
-    node.style.opacity = car.state === "scheduled" || car.state === "done" ? "0" : "1";
-    node.style.zIndex = `${Math.round(point.y * 10)}`;
-    node.title = `${car.vehicle_type} ${car.id}: ${car.exit_phase ? `${car.state}/${car.exit_phase}` : car.state}`;
+    const transform = `translate(-50%, -50%) rotate(${angle}deg)`;
+    if (node.style.transform !== transform) {
+      node.style.transform = transform;
+    }
+    const opacity = car.state === "scheduled" || car.state === "done" ? "0" : "1";
+    if (node.style.opacity !== opacity) {
+      node.style.opacity = opacity;
+    }
+    const zIndex = `${Math.round(point.y * 10)}`;
+    if (node.style.zIndex !== zIndex) {
+      node.style.zIndex = zIndex;
+    }
+    const title = `${car.vehicle_type} ${car.id}: ${car.exit_phase ? `${car.state}/${car.exit_phase}` : car.state}`;
+    if (node.title !== title) {
+      node.title = title;
+    }
   });
 }
 
@@ -463,21 +593,52 @@ function resetPlayback() {
   if (simulationData) renderFrame(simulationData.frames[0], null, 0);
 }
 
+// Wall-clock ms that used to advance one dense snapshot (0.05 sim minutes).
+const REFERENCE_MS = 40;
+const REFERENCE_SIM_MINUTES = 0.05;
+let lastTransitionDurationMs = null;
+
+/** Wall-clock ms for one keyframe step at 1x (scales with sparse compact gaps). */
+function baseIntervalMsAt(index) {
+  if (!simulationData?.frames?.length) return REFERENCE_MS;
+  const frames = simulationData.frames;
+  const i = Math.max(0, Math.min(index, frames.length - 1));
+  const t0 = frames[i].time_minutes;
+  const t1 = frames[Math.min(i + 1, frames.length - 1)].time_minutes;
+  const simDelta = Math.max(REFERENCE_SIM_MINUTES, t1 - t0);
+  return (simDelta / REFERENCE_SIM_MINUTES) * REFERENCE_MS;
+}
+
+/**
+ * Keep CSS --transition-duration in step with the current wall-clock frame gap so
+ * any CSS motion spans sparse keyframes instead of the old dense 40ms cadence.
+ */
+function syncTransitionDuration(baseIntervalMs = baseIntervalMsAt(frameIndex)) {
+  const wallMs = baseIntervalMs / speedMultiplier;
+  const duration = Math.max(40, Math.round(wallMs * 0.85));
+  if (lastTransitionDurationMs === duration) return;
+  lastTransitionDurationMs = duration;
+  document.documentElement.style.setProperty("--transition-duration", `${duration}ms`);
+}
+
 function tick(timestamp) {
-  if (!playing || !simulationData) {
+  if (!playing || !simulationData || !simulationData.frames.length) {
     window.requestAnimationFrame(tick);
     return;
   }
 
   if (!lastTick) lastTick = timestamp;
-  // Base frame interval. 1x now plays at what used to be 10x; the slider goes up from there.
-  const currentInterval = 40 / speedMultiplier;
+  // Scale interval by keyframe time delta so sparse compact timelines keep real-time pace.
+  const frames = simulationData.frames;
+  const baseIntervalMs = baseIntervalMsAt(frameIndex);
+  const currentInterval = baseIntervalMs / speedMultiplier;
+  syncTransitionDuration(baseIntervalMs);
   const elapsed = timestamp - lastTick;
   const subProgress = Math.min(1, elapsed / currentInterval);
 
-  const nextFrameIndex = (frameIndex + 1) % simulationData.frames.length;
-  const nextFrame = simulationData.frames[nextFrameIndex];
-  renderFrame(simulationData.frames[frameIndex], nextFrame, subProgress);
+  const nextFrameIndex = (frameIndex + 1) % frames.length;
+  const nextFrame = frames[nextFrameIndex];
+  renderFrame(frames[frameIndex], nextFrame, subProgress);
 
   if (elapsed >= currentInterval) {
     frameIndex = nextFrameIndex;
@@ -488,10 +649,19 @@ function tick(timestamp) {
 
 const DEFAULT_BACKGROUND = "/static/assets/generated/custom-parking-background.png";
 const MAP_BACKGROUNDS = {
-  two_entrance_two_exit: "/static/assets/generated/map-two-entrance-two-exit.png?v=3",
-  two_entrance_one_exit: "/static/assets/generated/map-two-entrance-one-exit.png?v=3",
-  one_entrance_two_exit: "/static/assets/generated/map-one-entrance-two-exit.png?v=3",
+  two_entrance_two_exit: "/static/assets/generated/map-two-entrance-two-exit.png",
+  two_entrance_one_exit: "/static/assets/generated/map-two-entrance-one-exit.png",
+  one_entrance_two_exit: "/static/assets/generated/map-one-entrance-two-exit.png",
 };
+
+function preloadMapBackgrounds() {
+  const urls = [DEFAULT_BACKGROUND, ...Object.values(MAP_BACKGROUNDS)];
+  urls.forEach((url) => {
+    const img = new Image();
+    img.decoding = "async";
+    img.src = url;
+  });
+}
 
 function applyMap(map) {
   activeMap = map;
@@ -584,13 +754,22 @@ function updateInputPlaceholders(defaults) {
 async function loadSimulation() {
   const scenario = scenarioSelect.value || "baseline";
   const map = mapSelect.value || "one_entrance_one_exit";
+  const customQuery = customParamQuery();
+  const cacheKey = simulationCacheKey(map, scenario, customQuery);
   setLoadingState(true);
   setSimulationStatus(`Loading ${scenarioLabel(scenario)}...`, "loading");
   applyMap(map);
   try {
-    const nextSimulationData = await fetchJson(
-      `/api/simulation?map=${encodeURIComponent(map)}&scenario=${encodeURIComponent(scenario)}${customParamQuery()}&t=${Date.now()}`
-    );
+    let nextSimulationData;
+    if (clientSimulationCache.has(cacheKey)) {
+      nextSimulationData = clientSimulationCache.get(cacheKey);
+    } else {
+      const raw = await fetchJson(
+        `/api/simulation?format=compact&map=${encodeURIComponent(map)}&scenario=${encodeURIComponent(scenario)}${customQuery}`
+      );
+      nextSimulationData = expandCompactSimulation(raw);
+      rememberClientCache(cacheKey, nextSimulationData);
+    }
     simulationData = nextSimulationData;
     updateInputPlaceholders(simulationData.defaults);
     carLayer.innerHTML = "";
@@ -637,12 +816,12 @@ async function loadScenarios() {
   }
 }
 
-scenarioSelect.addEventListener("change", async () => {
-  await loadSimulation();
+scenarioSelect.addEventListener("change", () => {
+  scheduleLoadSimulation();
 });
 
-mapSelect.addEventListener("change", async () => {
-  await loadSimulation();
+mapSelect.addEventListener("change", () => {
+  scheduleLoadSimulation();
 });
 
 playPauseButton.addEventListener("click", () => {
@@ -681,12 +860,16 @@ if (speedSlider && speedValue) {
   speedSlider.addEventListener("input", (event) => {
     speedMultiplier = parseFloat(event.target.value);
     speedValue.textContent = `${speedMultiplier.toFixed(2)}x`;
-    const duration = Math.round(40 / speedMultiplier);
-    document.documentElement.style.setProperty("--transition-duration", `${duration}ms`);
+    // Match CSS transition length to the keyframe-scaled wall interval, not fixed 40ms.
+    syncTransitionDuration();
   });
 }
 
+// Initial CSS duration (dense-frame floor); tick will re-sync to sparse gaps once data loads.
+syncTransitionDuration(REFERENCE_MS);
+
 setLoadingState(true);
+preloadMapBackgrounds();
 loadScenarios().then(() => {
   window.requestAnimationFrame(tick);
 });

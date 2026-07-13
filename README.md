@@ -102,6 +102,13 @@ Unknown scenario names fall back to `baseline`.
 - `entry_gate_count` / `exit_gate_count`: Number of parallel gates used for the run.
 - `average_entry_queue_length` / `average_exit_queue_length`: Time-averaged queue length at each gate.
 
+## Performance
+
+- Dashboard requests `GET /api/simulation?format=compact` (default).
+- Use `format=full` for the dense frame dump (debug/tests).
+- Identical queries are cached in memory on the server; the browser also caches expanded results.
+- Map backgrounds are preloaded and long-cached under `/static/assets/`.
+
 ## API Endpoints
 
 ```text

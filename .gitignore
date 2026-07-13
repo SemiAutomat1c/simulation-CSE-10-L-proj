@@ -17,3 +17,4 @@ env/
 *.log
 .env
 .env.*
+.worktrees/
