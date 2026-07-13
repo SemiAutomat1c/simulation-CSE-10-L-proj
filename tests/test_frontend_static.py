@@ -17,7 +17,7 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("slotLayer", html)
         self.assertIn("carLayer", html)
         self.assertIn('/static/style.css?v=25', html)
-        self.assertIn('/static/app.js?v=28', html)
+        self.assertIn('/static/app.js?v=29', html)
         self.assertIn("metricMotorcycles", html)
         self.assertIn("Vehicle Mix", html)
         self.assertIn("simulationStatus", html)
@@ -102,6 +102,9 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("syncTransitionDuration", js)
         self.assertIn("--transition-duration", js)
         self.assertNotIn("baseIntervalMsAt", js)
+        # Stale in-flight loads must not clobber a newer map/scenario selection.
+        self.assertIn("loadGeneration", js)
+        self.assertIn("gen !== loadGeneration", js)
         self.assertIn("wheels-moving", js)
         self.assertIn("topdown-vehicle", js)
         self.assertIn('slot.state === "unavailable"', js)

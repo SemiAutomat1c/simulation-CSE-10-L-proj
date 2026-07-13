@@ -734,7 +734,11 @@ function updateInputPlaceholders(defaults) {
   }
 }
 
+// Bumped on every loadSimulation call so a slow older fetch cannot overwrite a newer one.
+let loadGeneration = 0;
+
 async function loadSimulation() {
+  const gen = ++loadGeneration;
   const scenario = scenarioSelect.value || "baseline";
   const map = mapSelect.value || "one_entrance_one_exit";
   const customQuery = customParamQuery();
@@ -750,9 +754,12 @@ async function loadSimulation() {
       const raw = await fetchJson(
         `/api/simulation?format=compact&map=${encodeURIComponent(map)}&scenario=${encodeURIComponent(scenario)}${customQuery}`
       );
+      if (gen !== loadGeneration) return;
       nextSimulationData = expandCompactSimulation(raw);
       rememberClientCache(cacheKey, nextSimulationData);
     }
+    // Stale response: a newer load started while we were waiting.
+    if (gen !== loadGeneration) return;
     simulationData = nextSimulationData;
     updateInputPlaceholders(simulationData.defaults);
     carLayer.innerHTML = "";
@@ -763,10 +770,14 @@ async function loadSimulation() {
     resetPlayback();
     setSimulationStatus(`${scenarioLabel(scenario)} ready`, "ready");
   } catch (error) {
+    if (gen !== loadGeneration) return;
     console.error("Failed to load simulation", error);
     setSimulationStatus("Could not load simulation. Keeping the last valid run.", "error");
   } finally {
-    setLoadingState(false);
+    // Only the latest in-flight load clears the loading UI.
+    if (gen === loadGeneration) {
+      setLoadingState(false);
+    }
   }
 }
 
