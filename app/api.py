@@ -33,6 +33,19 @@ MAPS = {
 
 _simulation_cache = LRUCache(maxsize=40)
 _metrics_cache: dict[tuple[str, str], dict] = {}
+_metrics_cache_lock = threading.Lock()
+# Per-key locks so concurrent identical /api/simulation misses only run SimPy once.
+_inflight_guard = threading.Lock()
+_inflight_locks: dict[tuple, threading.Lock] = {}
+
+
+def _inflight_lock_for(key: tuple) -> threading.Lock:
+    with _inflight_guard:
+        lock = _inflight_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _inflight_locks[key] = lock
+        return lock
 
 
 def _clamp(value: float | int | None, lo: float | int, hi: float | int) -> float | int | None:
@@ -200,19 +213,24 @@ def create_app(*, warm_defaults: bool = False) -> FastAPI:
         if cached is not None:
             return cached
 
-        payload = _build_payload(
-            scenario,
-            map,
-            clamped_total_cars,
-            clamped_slot_count,
-            clamped_entry_service,
-            clamped_exit_service,
-            clamped_base_search,
-            seed,
-            format_name,
-        )
-        _simulation_cache.set(key, payload)
-        return payload
+        # Single-flight: second waiter re-checks cache after the first build.
+        with _inflight_lock_for(key):
+            cached = _simulation_cache.get(key)
+            if cached is not None:
+                return cached
+            payload = _build_payload(
+                scenario,
+                map,
+                clamped_total_cars,
+                clamped_slot_count,
+                clamped_entry_service,
+                clamped_exit_service,
+                clamped_base_search,
+                seed,
+                format_name,
+            )
+            _simulation_cache.set(key, payload)
+            return payload
 
     @app.get("/api/compare")
     def compare(map: str = "one_entrance_one_exit") -> dict:
@@ -223,13 +241,15 @@ def create_app(*, warm_defaults: bool = False) -> FastAPI:
         scenarios = {}
         for name in SCENARIOS:
             key = (map, name)
-            if key not in _metrics_cache:
-                _metrics_cache[key] = run_simulation(
-                    ParkingSimulationConfig(scenario=name, map=map)
-                ).metrics
+            with _metrics_cache_lock:
+                if key not in _metrics_cache:
+                    _metrics_cache[key] = run_simulation(
+                        ParkingSimulationConfig(scenario=name, map=map)
+                    ).metrics
+                metrics = _metrics_cache[key]
             scenarios[name] = {
                 "description": SCENARIOS[name],
-                "metrics": _metrics_cache[key],
+                "metrics": metrics,
             }
         return {"scenarios": scenarios}
 

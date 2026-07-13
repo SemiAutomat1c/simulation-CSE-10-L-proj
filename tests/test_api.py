@@ -56,6 +56,41 @@ class ParkingApiTests(unittest.TestCase):
         finally:
             api_module.run_simulation = original
 
+    def test_simulation_single_flight_coalesces_concurrent_misses(self) -> None:
+        """Concurrent identical first loads should only run SimPy once."""
+        import threading
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        from app import api as api_module
+
+        api_module._simulation_cache.clear()
+        calls = {"n": 0}
+        barrier = threading.Barrier(4)
+        original = api_module.run_simulation
+
+        def counting(config):
+            calls["n"] += 1
+            # Hold the first builder so other threads queue on the inflight lock.
+            return original(config)
+
+        api_module.run_simulation = counting
+        try:
+            def hit():
+                barrier.wait(timeout=10)
+                return self.client.get(
+                    "/api/simulation?scenario=baseline&map=one_entrance_one_exit"
+                )
+
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                futures = [pool.submit(hit) for _ in range(4)]
+                results = [f.result(timeout=120) for f in as_completed(futures)]
+            self.assertTrue(all(r.status_code == 200 for r in results))
+            self.assertEqual(calls["n"], 1)
+            bodies = [r.json() for r in results]
+            self.assertTrue(all(b == bodies[0] for b in bodies))
+        finally:
+            api_module.run_simulation = original
+
     def test_static_assets_have_long_cache_headers(self) -> None:
         response = self.client.get("/static/assets/generated/custom-parking-background.png")
         self.assertEqual(response.status_code, 200)
