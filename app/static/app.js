@@ -360,8 +360,14 @@ function updateSlots(frame) {
   frame.slots.forEach((slot) => {
     const node = slotNodes.get(slot.id);
     if (!node) return;
-    node.className = slotClass(slot);
-    node.style.zIndex = slot.state === "unavailable" ? "260" : `${100 + slot.row}`;
+    const nextClass = slotClass(slot);
+    if (node.className !== nextClass) {
+      node.className = nextClass;
+    }
+    const nextZ = slot.state === "unavailable" ? "260" : `${100 + slot.row}`;
+    if (node.style.zIndex !== nextZ) {
+      node.style.zIndex = nextZ;
+    }
   });
 }
 
@@ -388,23 +394,23 @@ function shouldInterpolatePosition(car, nextCar) {
   return car.exit_phase === nextCar.exit_phase && ["merge", "road"].includes(car.exit_phase);
 }
 
+function setTextIfChanged(el, value) {
+  if (!el) return;
+  const text = String(value);
+  if (el.textContent !== text) {
+    el.textContent = text;
+  }
+}
+
 function renderFrame(frame, nextFrame, subProgress) {
   ensureCars(frame);
   updateSlots(frame);
 
   if (entryGateArm) {
-    if (frame.entry_gate_open) {
-      entryGateArm.classList.add("open");
-    } else {
-      entryGateArm.classList.remove("open");
-    }
+    entryGateArm.classList.toggle("open", Boolean(frame.entry_gate_open));
   }
   if (exitGateArm) {
-    if (frame.exit_gate_open) {
-      exitGateArm.classList.add("open");
-    } else {
-      exitGateArm.classList.remove("open");
-    }
+    exitGateArm.classList.toggle("open", Boolean(frame.exit_gate_open));
   }
   // Custom-map animated gate arms (open with the same gate-state flags).
   customGateNodes.forEach((node) => {
@@ -412,20 +418,25 @@ function renderFrame(frame, nextFrame, subProgress) {
     node.classList.toggle("open", Boolean(open));
   });
 
-  currentTime.textContent = prettyMinutes(frame.time_minutes);
-  entryQueue.textContent = frame.current_entry_queue;
-  availableSlots.textContent = frame.available_slots;
-  exitQueue.textContent = frame.current_exit_queue;
+  setTextIfChanged(currentTime, prettyMinutes(frame.time_minutes));
+  setTextIfChanged(entryQueue, frame.current_entry_queue);
+  setTextIfChanged(availableSlots, frame.available_slots);
+  setTextIfChanged(exitQueue, frame.current_exit_queue);
+
+  const nextById = nextFrame
+    ? new Map(nextFrame.cars.map((c) => [c.id, c]))
+    : null;
+  const movingStates = new Set(["approaching_gate", "gate_crossing", "searching", "exit_queue", "exiting", "denied"]);
 
   frame.cars.forEach((car) => {
     const node = carNodes.get(car.id);
+    if (!node) return;
 
     // Sub-frame interpolation between current and next frame
     let interpX = car.x;
     let interpY = car.y;
-    const movingStates = new Set(["approaching_gate", "gate_crossing", "searching", "exit_queue", "exiting", "denied"]);
-    if (nextFrame && subProgress > 0 && movingStates.has(car.state)) {
-      const nextCar = nextFrame.cars.find((c) => c.id === car.id);
+    if (nextById && subProgress > 0 && movingStates.has(car.state)) {
+      const nextCar = nextById.get(car.id);
       if (nextCar && movingStates.has(nextCar.state) && shouldInterpolatePosition(car, nextCar)) {
         const interp = interpolatePosition(car.x, car.y, nextCar.x, nextCar.y, subProgress);
         interpX = interp.x;
@@ -435,14 +446,33 @@ function renderFrame(frame, nextFrame, subProgress) {
 
     const point = mapScenePoint(interpX, interpY, { row: sceneMappingRow(car) });
     const cssPoint = { left: `${point.x}%`, top: `${point.y}%` };
-    node.className = carClass(car);
-    node.style.left = cssPoint.left;
-    node.style.top = cssPoint.top;
+    const nextClass = carClass(car);
+    if (node.className !== nextClass) {
+      node.className = nextClass;
+    }
+    if (node.style.left !== cssPoint.left) {
+      node.style.left = cssPoint.left;
+    }
+    if (node.style.top !== cssPoint.top) {
+      node.style.top = cssPoint.top;
+    }
     const angle = movementAngle(car, cssPoint, node);
-    node.style.transform = `translate(-50%, -50%) rotate(${angle}deg)`;
-    node.style.opacity = car.state === "scheduled" || car.state === "done" ? "0" : "1";
-    node.style.zIndex = `${Math.round(point.y * 10)}`;
-    node.title = `${car.vehicle_type} ${car.id}: ${car.exit_phase ? `${car.state}/${car.exit_phase}` : car.state}`;
+    const transform = `translate(-50%, -50%) rotate(${angle}deg)`;
+    if (node.style.transform !== transform) {
+      node.style.transform = transform;
+    }
+    const opacity = car.state === "scheduled" || car.state === "done" ? "0" : "1";
+    if (node.style.opacity !== opacity) {
+      node.style.opacity = opacity;
+    }
+    const zIndex = `${Math.round(point.y * 10)}`;
+    if (node.style.zIndex !== zIndex) {
+      node.style.zIndex = zIndex;
+    }
+    const title = `${car.vehicle_type} ${car.id}: ${car.exit_phase ? `${car.state}/${car.exit_phase}` : car.state}`;
+    if (node.title !== title) {
+      node.title = title;
+    }
   });
 }
 
@@ -566,6 +596,30 @@ function resetPlayback() {
 // Wall-clock ms that used to advance one dense snapshot (0.05 sim minutes).
 const REFERENCE_MS = 40;
 const REFERENCE_SIM_MINUTES = 0.05;
+let lastTransitionDurationMs = null;
+
+/** Wall-clock ms for one keyframe step at 1x (scales with sparse compact gaps). */
+function baseIntervalMsAt(index) {
+  if (!simulationData?.frames?.length) return REFERENCE_MS;
+  const frames = simulationData.frames;
+  const i = Math.max(0, Math.min(index, frames.length - 1));
+  const t0 = frames[i].time_minutes;
+  const t1 = frames[Math.min(i + 1, frames.length - 1)].time_minutes;
+  const simDelta = Math.max(REFERENCE_SIM_MINUTES, t1 - t0);
+  return (simDelta / REFERENCE_SIM_MINUTES) * REFERENCE_MS;
+}
+
+/**
+ * Keep CSS --transition-duration in step with the current wall-clock frame gap so
+ * any CSS motion spans sparse keyframes instead of the old dense 40ms cadence.
+ */
+function syncTransitionDuration(baseIntervalMs = baseIntervalMsAt(frameIndex)) {
+  const wallMs = baseIntervalMs / speedMultiplier;
+  const duration = Math.max(40, Math.round(wallMs * 0.85));
+  if (lastTransitionDurationMs === duration) return;
+  lastTransitionDurationMs = duration;
+  document.documentElement.style.setProperty("--transition-duration", `${duration}ms`);
+}
 
 function tick(timestamp) {
   if (!playing || !simulationData || !simulationData.frames.length) {
@@ -576,11 +630,9 @@ function tick(timestamp) {
   if (!lastTick) lastTick = timestamp;
   // Scale interval by keyframe time delta so sparse compact timelines keep real-time pace.
   const frames = simulationData.frames;
-  const t0 = frames[frameIndex].time_minutes;
-  const t1 = frames[Math.min(frameIndex + 1, frames.length - 1)].time_minutes;
-  const simDelta = Math.max(REFERENCE_SIM_MINUTES, t1 - t0);
-  const baseIntervalMs = (simDelta / REFERENCE_SIM_MINUTES) * REFERENCE_MS;
+  const baseIntervalMs = baseIntervalMsAt(frameIndex);
   const currentInterval = baseIntervalMs / speedMultiplier;
+  syncTransitionDuration(baseIntervalMs);
   const elapsed = timestamp - lastTick;
   const subProgress = Math.min(1, elapsed / currentInterval);
 
@@ -808,10 +860,13 @@ if (speedSlider && speedValue) {
   speedSlider.addEventListener("input", (event) => {
     speedMultiplier = parseFloat(event.target.value);
     speedValue.textContent = `${speedMultiplier.toFixed(2)}x`;
-    const duration = Math.round(40 / speedMultiplier);
-    document.documentElement.style.setProperty("--transition-duration", `${duration}ms`);
+    // Match CSS transition length to the keyframe-scaled wall interval, not fixed 40ms.
+    syncTransitionDuration();
   });
 }
+
+// Initial CSS duration (dense-frame floor); tick will re-sync to sparse gaps once data loads.
+syncTransitionDuration(REFERENCE_MS);
 
 setLoadingState(true);
 preloadMapBackgrounds();
