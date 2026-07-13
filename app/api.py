@@ -141,7 +141,7 @@ def create_app(*, warm_defaults: bool = False) -> FastAPI:
             assets_root = ASSETS_DIR.resolve()
         except OSError as exc:
             raise HTTPException(status_code=404) from exc
-        if not resolved.is_file() or not str(resolved).startswith(str(assets_root)):
+        if not resolved.is_file() or not resolved.is_relative_to(assets_root):
             raise HTTPException(status_code=404)
         return FileResponse(
             resolved,
