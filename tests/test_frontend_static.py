@@ -17,7 +17,7 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("slotLayer", html)
         self.assertIn("carLayer", html)
         self.assertIn('/static/style.css?v=25', html)
-        self.assertIn('/static/app.js?v=25', html)
+        self.assertIn('/static/app.js?v=26', html)
         self.assertIn("metricMotorcycles", html)
         self.assertIn("Vehicle Mix", html)
         self.assertIn("simulationStatus", html)
@@ -81,6 +81,10 @@ class FrontendStaticTests(unittest.TestCase):
 
         self.assertIn("/api/scenarios", js)
         self.assertIn("/api/simulation", js)
+        self.assertIn("format=compact", js)
+        self.assertIn("expandCompactSimulation", js)
+        self.assertIn("clientSimulationCache", js)
+        self.assertIn("preloadMapBackgrounds", js)
         self.assertIn("renderFrame", js)
         self.assertIn("requestAnimationFrame", js)
         self.assertIn("vehicle_type", js)
@@ -96,6 +100,32 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("wheels-moving", js)
         self.assertIn("topdown-vehicle", js)
         self.assertIn('slot.state === "unavailable"', js)
+        # Compact fetch must not bust cache with Date.now(); client cache keys instead.
+        self.assertNotIn("/api/simulation?map=", js)  # legacy full fetch shape without format=
+        sim_fetch_region = js[js.find("/api/simulation") : js.find("/api/simulation") + 220]
+        self.assertIn("format=compact", sim_fetch_region)
+        self.assertNotIn("Date.now()", sim_fetch_region)
+
+    def test_map_backgrounds_use_stable_urls_without_query_bust(self) -> None:
+        js = (self.static_dir / "app.js").read_text()
+
+        self.assertIn("MAP_BACKGROUNDS", js)
+        # Stable asset URLs (no ?v= cache busters on map PNGs).
+        self.assertIn(
+            'two_entrance_two_exit: "/static/assets/generated/map-two-entrance-two-exit.png"',
+            js,
+        )
+        self.assertIn(
+            'two_entrance_one_exit: "/static/assets/generated/map-two-entrance-one-exit.png"',
+            js,
+        )
+        self.assertIn(
+            'one_entrance_two_exit: "/static/assets/generated/map-one-entrance-two-exit.png"',
+            js,
+        )
+        self.assertNotIn("map-two-entrance-two-exit.png?v=", js)
+        self.assertNotIn("map-two-entrance-one-exit.png?v=", js)
+        self.assertNotIn("map-one-entrance-two-exit.png?v=", js)
 
     def test_frontend_has_scenario_comparison_logic(self) -> None:
         js = (self.static_dir / "app.js").read_text()
